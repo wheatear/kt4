@@ -1,0 +1,9 @@
+#固话开户数据格式，一共是空格分隔的26个字段，前面5个是用户属性字段，后面21个是用户业务权限，取值是true和 false各字段解释如下：
+#name  8位的固话号码
+#USERLOCKFLG 用户闭锁标识。0－不闭锁，1－呼入闭锁，2-呼出闭锁，3-呼入呼出闭锁
+#USER_PORTALACCOUNT_ENABLEACCOUNT Portal Account是否激活，默认填NONE
+#POSTCODE 用户区号默认 10
+#ServiceType 用户订购业务类型，固话选0，如果为0，则表示用户订购为多媒体桌面电话业务，上述ShortNumber字段对应的短号码无效；如果为1，则表示用户订购为融合V网业务，上述ShortNumber字段对应的短号码为有效短号码。[确认mvpn_phone]
+#name USERLOCKFLG USER_PORTALACCOUNT_ENABLEACCOUNT POSTCODE ServiceType CallingLineIdentificationPresentation CallingLineIdentificationRestriction CallingLineIdentificationRestrictionOverride CallWaiting CallHold CallForwardingUnconditional CallForwardingBusy CallForwardingNoReply CallForwardingOffline CallBarring DoNotDisturb SettingServiceOverstep BlindCallTransfer ConsultativeCallTransfer ThreePartyService VirtualAttendantConsole AttendantEnb Fax CallContinue ConvenientNumber CTD
+
+
