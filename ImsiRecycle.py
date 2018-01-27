@@ -180,10 +180,10 @@ class CentrexClient(object):
         pass
 
 
-class CentrexFac(object):
-    def __init__(self, cfg, cmdFile, orderDs):
+class KtSyncFac(object):
+    def __init__(self, cfg, orderDs):
         self.cfg = cfg
-        self.cmdFile = cmdFile
+        # self.cmdFile = cmdFile
         self.orderDsName = orderDs
         self.orderDs = None
         self.aClient = []
@@ -572,19 +572,16 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.cfgFile = '%s.cfg' % self.appFull
-        # self.logFile = 'psparse.log'
         self.cmdFile = None
         self.caseDs = None
-        # self.resultOut = 'PS_MODEL_SUMMARY'
-        self.resultOut = 'PS_SYNCMODEL_SUMMARY'
 
     def checkArgv(self):
-        if self.argc < 3:
+        if self.argc < 2:
             self.usage()
         # self.checkopt()
         argvs = sys.argv[1:]
-        self.cmdFile = sys.argv[1]
-        self.caseDs = sys.argv[2]
+        # self.cmdFile = sys.argv[1]
+        self.caseDs = sys.argv[1]
         self.logFile = '%s%s' % (self.caseDs, '.log')
         self.resultOut = '%s%s' % (self.caseDs, '.rsp')
 
@@ -596,8 +593,8 @@ class Main(object):
             self.client = cli
 
     def usage(self):
-        print "Usage: %s cmdfile datafile" % self.baseName
-        print "example:   %s %s" % (self.baseName,'creatUser teldata')
+        print "Usage: %s datafile" % self.baseName
+        print "example:   %s %s" % (self.baseName,'teldata')
         exit(1)
 
     def start(self):
@@ -608,15 +605,9 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        # self.buildCentrexClient()
-        # 'zg.ps_provision_his_100_201710'
-        factory = CentrexFac(self.cfg, self.cmdFile, self.caseDs)
+        factory = KtSyncFac(self.cfg, self.caseDs)
         director = Director(factory)
         director.start()
-        # parser.makeParaModel()
-        # parser.parsePs()
-        # parser.checkResultTable()
-        # parser.saveResult()
 
 
 # main here
