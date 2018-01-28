@@ -57,7 +57,7 @@ class KtSyncClt(object):
 
     def loadCmd(self):
         tmpl = None
-        tmplMsg = 'TRADE_ID=1111111;ACTION_ID=5;DISP_GPRS=4;PS_SERVICE_TYPE=HLR;MSISDN=\^<%s\^>;IMSI=\^<%s\^>;'
+        tmplMsg = 'TRADE_ID=1111111;ACTION_ID=5;DISP_GPRS=4;PS_SERVICE_TYPE=HLR;MSISDN=^<BILL_ID^>;IMSI=^<IMSI^>;'
         tmpl = CmdTemplate(tmplMsg)
         self.aCmdTemplates.append(tmpl)
 
@@ -114,7 +114,7 @@ class KtSyncClt(object):
     def makeMsgHead(self):
         self.msgHead = '%08dREQ:'
 
-    def makeHttpMsg(self, order):
+    def makeMsgBody(self, order):
         for tmpl in self.aCmdTemplates:
             httpBody = tmpl.cmdTmpl
             for var in tmpl.aVariables:
@@ -127,14 +127,15 @@ class KtSyncClt(object):
                 paName = '^<%s^>' % var
                 if httpBody.find(paName) > -1:
                     httpBody = httpBody.replace(paName, order.dParam[var])
-            contentLength = len(httpBody)
-            httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
-            httpRequest = '%s%s' % (httpHead, httpBody)
-            logging.debug(httpRequest)
-            order.aReqMsg.append(httpRequest)
+            order.aReqMsg.append(httpBody)
+            # contentLength = len(httpBody)
+            # httpHead = self.msgHead.replace('^<body_length^>', str(contentLength))
+            # httpRequest = '%s%s' % (httpHead, httpBody)
+            # logging.debug(httpRequest)
+            # order.aReqMsg.append(httpRequest)
 
     def sendOrder(self, order):
-        self.makeHttpMsg(order)
+        self.makeMsgBody(order)
         # logging.debug(order.httpRequest)
         for req in order.aReqMsg:
             self.remoteServer.send(req)
@@ -153,7 +154,7 @@ class KtSyncClt(object):
         logging.debug(rspMsg)
         logging.info('parse orders response...')
         resp = 0
-        if rspMsg.find('<ns22:resultcode xmlns:ns22="http://msg.centrex.imsservice.chinamobile.com"><value>0</value></ns22:resultcode>') > -1:
+        if rspMsg.find('ERR_CODE=9;') > -1:
             resp = 1
         else:
             # m = re.search(r'(<ns22:.+?Response.+</ns22:.+?Response>)', rspMsg)
@@ -211,7 +212,7 @@ class ReqOrder(object):
 class KtSyncFac(object):
     def __init__(self, cfg, orderDs):
         self.cfg = cfg
-        # self.cmdFile = cmdFile
+        self.cmdFile = None
         self.orderDsName = orderDs
         self.orderDs = None
         self.aClient = []
@@ -256,6 +257,7 @@ class KtSyncFac(object):
             order.setParaName(self.aColHead)
             order.setPara(aParams)
             order.line = line
+            logging.debug('load order %s', line)
             return order
         return None
         # self.closeDs()
@@ -349,6 +351,7 @@ class Conf(object):
         self.cfgFile = cfgfile
         self.logLevel = None
         self.aClient = []
+        self.fCfg = None
 
     def loadLogLevel(self):
         try:
@@ -368,6 +371,20 @@ class Conf(object):
                 self.logLevel = eval(logLevel)
                 break
         fCfg.close()
+        return self.logLevel
+
+    def openCfg(self):
+        if self.fCfg: return self.fCfg
+        try:
+            self.fCfg = open(self.cfgFile, 'r')
+        except IOError, e:
+            logging.fatal('can not open configue file %s', self.cfgFile)
+            logging.fatal('exit.')
+            exit(2)
+        return self.fCfg
+
+    def closeCfg(self):
+        if self.fCfg: self.fCfg.close()
 
     def loadClient(self):
         # super(self.__class__, self).__init__()
@@ -384,9 +401,9 @@ class Conf(object):
         for line in fCfg:
             line = line.strip()
             if len(line) == 0:
-                # clientSection = 0
-                # if client is not None: self.aClient.append(client)
-                # client = None
+                clientSection = 0
+                if client is not None: self.aClient.append(client)
+                client = None
                 continue
             if line == '#provisioning client conf':
                 if clientSection == 1:
@@ -395,32 +412,24 @@ class Conf(object):
                     client = None
 
                 clientSection = 1
-                client = KtClient()
+                client = Centrex()
                 continue
             if clientSection < 1:
                 continue
             logging.debug(line)
             param = line.split(' = ', 1)
-            if param[0] == 'prvnName':
-                client.ktName = param[1]
-            elif param[0] == 'dbusr':
-                client.dbUser = param[1]
-            elif param[0] == 'type':
-                client.ktType = param[1]
-            elif param[0] == 'dbpwd':
-                client.dbPwd = param[1]
-            elif param[0] == 'dbhost':
-                client.dbHost = param[1]
-            elif param[0] == 'dbport':
-                client.dbPort = param[1]
-            elif param[0] == 'dbsid':
-                client.dbSid = param[1]
-            elif param[0] == 'table':
-                client.orderTablePre = param[1]
-            elif param[0] == 'server':
-                client.syncServer = param[1]
+            if param[0] == 'server':
+                client.serverIp = param[1]
             elif param[0] == 'sockPort':
-                client.sockPort = param[1]
+                client.port = param[1]
+            elif param[0] == 'GLOBAL_USER':
+                client.user = param[1]
+            elif param[0] == 'GLOBAL_PASSWD':
+                client.passwd = param[1]
+            elif param[0] == 'GLOBAL_RTSNAME':
+                client.rtsname = param[1]
+            elif param[0] == 'GLOBAL_URL':
+                client.url = param[1]
         fCfg.close()
         logging.info('load %d clients.', len(self.aClient))
         return self.aClient
