@@ -27,7 +27,18 @@ class HssUser(object):
         pass
 
 
-class CentrexClient(object):
+class CmdTemplate(object):
+    def __init__(self, cmdTmpl):
+        self.cmdTmpl = cmdTmpl
+        self.varExpt = r'\^<(.+?)\^>'
+        self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
+
+    def setMsg(self, cmdMsg):
+        self.cmdTmpl = cmdMsg
+        self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
+
+
+class KtSyncClt(object):
     def __init__(self, cfg, cmdfile):
         self.cfg = cfg
         self.cmdFile = cmdfile
@@ -45,33 +56,10 @@ class CentrexClient(object):
         self.remoteServer = None
 
     def loadCmd(self):
-        try:
-            cmd = open(self.cmdFile, 'r')
-        except IOError, e:
-            print('Can not open cmd file %s: %s' % (self.cmdFile, e))
-            exit(2)
         tmpl = None
-        tmplMsg = ''
-        for line in cmd:
-            line = line.strip()
-            if len(line) == 0:
-                if len(tmplMsg) > 0:
-                    logging.info(tmplMsg)
-                    tmpl = CmdTemplate(tmplMsg)
-                    logging.info(tmpl.aVariables)
-                    self.aCmdTemplates.append(tmpl)
-                    tmpl = None
-                    tmplMsg = ''
-                continue
-            tmplMsg = '%s%s' % (tmplMsg, line)
-        if len(tmplMsg) > 0:
-            logging.info(tmplMsg)
-            tmpl = CmdTemplate(tmplMsg)
-            logging.info(tmpl.aVariables)
-            self.aCmdTemplates.append(tmpl)
-
-        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
-        cmd.close()
+        tmplMsg = 'TRADE_ID=11111111;ACTION_ID=1;DISP_SUB=4;PS_SERVICE_TYPE=HLR;MSISDN=\^<%s\^>;IMSI=\^<%s\^>;'
+        tmpl = CmdTemplate(tmplMsg)
+        self.aCmdTemplates.append(tmpl)
 
     def loadClient(self):
         fCfg = self.cfg.openCfg()
@@ -81,7 +69,7 @@ class CentrexClient(object):
             line = line.strip()
             if len(line) == 0:
                 continue
-            if line == '#centrex client conf':
+            if line == '#kt sync server conf':
                 clientSection = 1
                 continue
             if clientSection < 1:
@@ -101,8 +89,6 @@ class CentrexClient(object):
             elif param[0] == 'GLOBAL_URL':
                 self.url = param[1]
         fCfg.close()
-        # logging.info('load %d clients.', len(self.aClient))
-        # return self.aClient
 
     def makeCmdTempate(self):
         for tmpl in self.aCmdTemplates:
@@ -572,7 +558,7 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.cfgFile = '%s.cfg' % self.appFull
-        self.cmdFile = None
+        # self.cmdFile = None
         self.caseDs = None
 
     def checkArgv(self):
