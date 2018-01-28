@@ -57,7 +57,7 @@ class KtSyncClt(object):
 
     def loadCmd(self):
         tmpl = None
-        tmplMsg = 'TRADE_ID=11111111;ACTION_ID=1;DISP_SUB=4;PS_SERVICE_TYPE=HLR;MSISDN=\^<%s\^>;IMSI=\^<%s\^>;'
+        tmplMsg = 'TRADE_ID=1111111;ACTION_ID=5;DISP_GPRS=4;PS_SERVICE_TYPE=HLR;MSISDN=\^<%s\^>;IMSI=\^<%s\^>;'
         tmpl = CmdTemplate(tmplMsg)
         self.aCmdTemplates.append(tmpl)
 
@@ -91,10 +91,11 @@ class KtSyncClt(object):
         fCfg.close()
 
     def makeCmdTempate(self):
-        for tmpl in self.aCmdTemplates:
-            msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
-            msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
-            tmpl.setMsg(msg)
+        pass
+        # for tmpl in self.aCmdTemplates:
+        #     msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
+        #     msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
+        #     tmpl.setMsg(msg)
 
     def makeHttpHead(self):
         httpHead = 'POST /imsservice/services/CentrexService HTTP/1.1\r\n'
@@ -109,6 +110,9 @@ class KtSyncClt(object):
         httpHead = httpHead.replace('^<server^>', self.serverIp)
         httpHead = httpHead.replace('^<sockPort^>', self.port)
         self.httpHead = httpHead
+
+    def makeMsgHead(self):
+        self.msgHead = '%08dREQ:'
 
     def makeHttpMsg(self, order):
         for tmpl in self.aCmdTemplates:
@@ -137,7 +141,8 @@ class KtSyncClt(object):
             self.recvResp(order)
 
     def connectServer(self):
-        if self.remoteServer: self.remoteServer.close()
+        # if self.remoteServer: self.remoteServer.close()
+        if self.remoteServer: return self.remoteServer
         self.remoteServer = TcpClt(self.serverIp, int(self.port))
         # self.remoteServer.connect()
         return self.remoteServer
@@ -147,23 +152,60 @@ class KtSyncClt(object):
         rspMsg = self.remoteServer.recv()
         logging.debug(rspMsg)
         logging.info('parse orders response...')
-        resp = {}
+        resp = 0
         if rspMsg.find('<ns22:resultcode xmlns:ns22="http://msg.centrex.imsservice.chinamobile.com"><value>0</value></ns22:resultcode>') > -1:
-            resp['response'] = 'success'
-            resp['status'] = 'success'
+            resp = 1
         else:
-            m = re.search(r'(<ns22:.+?Response.+</ns22:.+?Response>)', rspMsg)
-            if m is not None:
-                resp['response'] = m.group(1)
-            else:
-                resp['response'] = rspMsg
-            resp['status'] = 'fail'
+            # m = re.search(r'(<ns22:.+?Response.+</ns22:.+?Response>)', rspMsg)
+            # if m is not None:
+            #     resp['response'] = m.group(1)
+            # else:
+            #     resp['response'] = rspMsg
+            # resp['status'] = 'fail'
+            pass
         order.aResp.append(resp)
-        logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+        logging.info('response %s %s' % (order.dParam['BILL_ID'], resp))
         # order.rspMsg = rspMsg
 
     def saveResp(self, order):
         pass
+
+
+class ReqOrder(object):
+    def __init__(self):
+        self.no = None
+        self.dParam = {}
+        self.aReqMsg = []
+        self.aResp = []
+        self.aParamName = []
+
+    def setParaName(self, aParaNames):
+        self.aParamName = aParaNames
+
+    def setPara(self, paras):
+        for i, pa in enumerate(paras):
+            key = self.aParamName[i]
+            self.dParam[key] = pa
+
+    def getStatus(self):
+        status = ''
+        for resp in self.aResp:
+            status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
+        return status
+
+
+# class TelOrder(ReqOrder):
+#     def __init__(self):
+#         super(self.__class__, self).__init__()
+#         # self.no = None
+#         # self.dParam = {}
+#         # self.aReqMsg = []
+#         # self.aResp = []
+#         self.dParam['BILL_ID'] = None
+#         self.dParam['USERLOCKFLG'] = 0
+#         self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = None
+#         self.dParam['POSTCODE'] = '10'
+#         self.dParam['ServiceType'] = 0
 
 
 class KtSyncFac(object):
@@ -173,7 +215,7 @@ class KtSyncFac(object):
         self.orderDsName = orderDs
         self.orderDs = None
         self.aClient = []
-        self.respName = '%s.rsp' % self.orderDsName
+        self.respName = '%s.hlr' % self.orderDsName
         self.resp = None
 
     def openDs(self):
@@ -187,6 +229,11 @@ class KtSyncFac(object):
     def closeDs(self):
         self.orderDs.close()
 
+    def loadOrderHead(self):
+        # colHead = self.orderDs.readline()
+        # self.aColHead = colHead.split()
+        self.aColHead = ('ICCID','IMSI','BILL_ID','EXPIRY')
+
     def openRsp(self):
         if self.resp: return self.resp
         try:
@@ -196,11 +243,7 @@ class KtSyncFac(object):
             exit(2)
         return self.resp
 
-    def makeOrderHead(self):
-        colHead = self.orderDs.readline()
-        self.aColHead = colHead.split()
-
-    def makeTelOrder(self):
+    def loadOrder(self):
         # self.openDs()
         for line in self.orderDs:
             line = line.strip()
@@ -209,9 +252,10 @@ class KtSyncFac(object):
             if line[0] == '#':
                 continue
             aParams = line.split()
-            order = TelOrder()
+            order = ReqOrder()
             order.setParaName(self.aColHead)
             order.setPara(aParams)
+            order.line = line
             return order
         return None
         # self.closeDs()
@@ -227,14 +271,14 @@ class KtSyncFac(object):
                 if client is not None: self.aClient.append(client)
                 client = None
                 continue
-            if line == '#centrex client conf':
+            if line == '#kt sync server conf':
                 if clientSection == 1:
                     clientSection = 0
                     if client is not None: self.aClient.append(client)
                     client = None
 
                 clientSection = 1
-                client = CentrexClient(self.cfg, self.cmdFile)
+                client = KtSyncClt(self.cfg, self.cmdFile)
                 continue
             if clientSection < 1:
                 continue
@@ -254,11 +298,11 @@ class KtSyncFac(object):
                 client.url = param[1]
         fCfg.close()
         logging.info('load %d clients.', len(self.aClient))
-        for centrex in self.aClient:
+        for clt in self.aClient:
             # centrex.connectServer()
-            centrex.loadCmd()
-            centrex.makeCmdTempate()
-            centrex.makeHttpHead()
+            clt.loadCmd()
+            clt.makeCmdTempate()
+            clt.makeMsgHead()
         return self.aClient
 
     def start(self):
@@ -272,19 +316,20 @@ class Director(object):
         self.fRsp = None
 
     def saveOrderRsp(self, order):
-        self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
+        self.fRsp.write('%s %s\r\n' % (order.line, order.aResp[0]))
 
     def start(self):
         client = self.factory.makeClient()[0]
         self.factory.openDs()
-        self.factory.makeOrderHead()
+        self.factory.loadOrderHead()
         self.fRsp = self.factory.openRsp()
         # client.loadClient()
         # client.loadCmd()
+        client.connectServer()
         i = 0
         while not self.shutDown:
             logging.debug('timeer %f load order', time.time())
-            order = self.factory.makeTelOrder()
+            order = self.factory.loadOrder()
             if order is None:
                 logging.info('load all orders,')
                 break
@@ -293,7 +338,7 @@ class Director(object):
             client.sendOrder(order)
             # client.recvResp(order)
             # client.saveResp(order)
-            client.remoteServer.close()
+            # client.remoteServer.close()
             self.saveOrderRsp(order)
         self.factory.closeDs()
         self.fRsp.close()
