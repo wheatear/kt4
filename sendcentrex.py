@@ -1,6 +1,17 @@
 #!/usr/bin/env python
 
-"""kt client"""
+"""sendcentrex.py"""
+######################################################################
+## Filename:      sendcentrex.py
+##
+## Version:       2.1
+## Author:        wangxintian <wangxt5@asiainfo.com>
+## Created at:
+##
+## Description:
+## 备注:
+##
+######################################################################
 
 import sys
 import os

@@ -122,3 +122,10 @@ venv.bak/
 
 # mypy 
 .mypy_cache/ 
+
+# kt4 ignore
+*.bak
+Python.gitignore
+wsdx_cycle_20170913.cy4
+wsdx_cycle_20180128.cy4
+log/

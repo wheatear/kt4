@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:m0="http://localhost:8080/imsservice/services/CentrexService">
+  <SOAP-ENV:Header>
+	<m:Security xmlns:m="http://wsse.centrex.imsservice.chinamobile.com">
+			<m:UsernameToken>
+			  <m:Username>^<GLOBAL_USER^></m:Username>
+		    <m:Password>^<GLOBAL_PASSWD^></m:Password>
+	    </m:UsernameToken>
+    </m:Security>
+  </SOAP-ENV:Header>
+	<SOAP-ENV:Body>
+		<m:saveUserService xmlns:m="http://msg.centrex.imsservice.chinamobile.com">
+			<m:name>+8610^<BILL_ID^></m:name>
+			<m:userServiceData>
+				<OperationType>0</OperationType>
+				<UserCallBarring>^<ITT^></UserCallBarring>
+			</m:userServiceData>
+		</m:saveUserService>
+	</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

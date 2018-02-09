@@ -27,331 +27,15 @@ class HssUser(object):
         pass
 
 
-class CmdTemplate(object):
-    def __init__(self, cmdTmpl):
-        self.cmdTmpl = cmdTmpl
-        self.varExpt = r'\^<(.+?)\^>'
-        self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
-
-    def setMsg(self, cmdMsg):
-        self.cmdTmpl = cmdMsg
-        self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
-
-
-class KtSyncClt(object):
-    def __init__(self, cfg, cmdfile):
-        self.cfg = cfg
-        self.cmdFile = cmdfile
-        self.httpHead = None
-        self.httpRequest = None
-        self.serverIp = None
-        self.port = None
-        self.url = None
-        self.user = None
-        self.passwd = None
-        self.rtsname = None
-        self.aCmdTemplates = []
-        self.httpHead = None
-        self.httpBody = None
-        self.remoteServer = None
-
-    def loadCmd(self):
-        tmpl = None
-        tmplMsg = 'TRADE_ID=1111111;ACTION_ID=5;DISP_GPRS=4;PS_SERVICE_TYPE=HLR;MSISDN=^<BILL_ID^>;IMSI=^<IMSI^>;'
-        tmpl = CmdTemplate(tmplMsg)
-        self.aCmdTemplates.append(tmpl)
-
-    def loadClient(self):
-        fCfg = self.cfg.openCfg()
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line == '#kt sync server conf':
-                clientSection = 1
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                self.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                self.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                self.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                self.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                self.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                self.url = param[1]
-        fCfg.close()
-
-    def makeCmdTempate(self):
-        pass
-        # for tmpl in self.aCmdTemplates:
-        #     msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
-        #     msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
-        #     tmpl.setMsg(msg)
-
-    def makeHttpHead(self):
-        httpHead = 'POST /imsservice/services/CentrexService HTTP/1.1\r\n'
-        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
-        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
-        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
-        httpHead = '%s%s' % (httpHead, 'Host: ^<server^>:^<sockPort^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
-        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
-        httpHead = httpHead.replace('^<server^>', self.serverIp)
-        httpHead = httpHead.replace('^<sockPort^>', self.port)
-        self.httpHead = httpHead
-
-    def makeMsgHead(self):
-        self.msgHead = '%08dREQ:'
-
-    def makeMsgBody(self, order):
-        for tmpl in self.aCmdTemplates:
-            httpBody = tmpl.cmdTmpl
-            for var in tmpl.aVariables:
-                logging.debug('find var %s', var)
-                logging.debug('find var %s', order.dParam.keys())
-                if var not in order.dParam.keys():
-                    logging.debug('dont find var %s', var)
-                    logging.fatal('%s have no field %s.', order.dParam['BILL_ID'], var)
-                    return -1
-                paName = '^<%s^>' % var
-                if httpBody.find(paName) > -1:
-                    httpBody = httpBody.replace(paName, order.dParam[var])
-            order.aReqMsg.append(httpBody)
-            # contentLength = len(httpBody)
-            # httpHead = self.msgHead.replace('^<body_length^>', str(contentLength))
-            # httpRequest = '%s%s' % (httpHead, httpBody)
-            # logging.debug(httpRequest)
-            # order.aReqMsg.append(httpRequest)
-
-    def sendOrder(self, order):
-        self.makeMsgBody(order)
-        # logging.debug(order.httpRequest)
-        for req in order.aReqMsg:
-            self.remoteServer.send(req)
-            self.recvResp(order)
-
-    def connectServer(self):
-        # if self.remoteServer: self.remoteServer.close()
-        if self.remoteServer: return self.remoteServer
-        self.remoteServer = TcpClt(self.serverIp, int(self.port))
-        # self.remoteServer.connect()
-        return self.remoteServer
-
-    def recvResp(self, order):
-        logging.info('receive orders response...')
-        rspMsg = self.remoteServer.recv()
-        logging.debug(rspMsg)
-        logging.info('parse orders response...')
-        resp = 0
-        if rspMsg.find('ERR_CODE=9;') > -1:
-            resp = 1
-        else:
-            # m = re.search(r'(<ns22:.+?Response.+</ns22:.+?Response>)', rspMsg)
-            # if m is not None:
-            #     resp['response'] = m.group(1)
-            # else:
-            #     resp['response'] = rspMsg
-            # resp['status'] = 'fail'
-            pass
-        order.aResp.append(resp)
-        logging.info('response %s %s' % (order.dParam['BILL_ID'], resp))
-        # order.rspMsg = rspMsg
-
-    def saveResp(self, order):
-        pass
-
-
-class ReqOrder(object):
-    def __init__(self):
-        self.no = None
-        self.dParam = {}
-        self.aReqMsg = []
-        self.aResp = []
-        self.aParamName = []
-
-    def setParaName(self, aParaNames):
-        self.aParamName = aParaNames
-
-    def setPara(self, paras):
-        for i, pa in enumerate(paras):
-            key = self.aParamName[i]
-            self.dParam[key] = pa
-
-    def getStatus(self):
-        status = ''
-        for resp in self.aResp:
-            status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
-        return status
-
-
-# class TelOrder(ReqOrder):
-#     def __init__(self):
-#         super(self.__class__, self).__init__()
-#         # self.no = None
-#         # self.dParam = {}
-#         # self.aReqMsg = []
-#         # self.aResp = []
-#         self.dParam['BILL_ID'] = None
-#         self.dParam['USERLOCKFLG'] = 0
-#         self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = None
-#         self.dParam['POSTCODE'] = '10'
-#         self.dParam['ServiceType'] = 0
-
-
-class KtSyncFac(object):
-    def __init__(self, cfg, orderDs):
-        self.cfg = cfg
-        self.cmdFile = None
-        self.orderDsName = orderDs
-        self.orderDs = None
-        self.aClient = []
-        self.respName = '%s.hlr' % self.orderDsName
-        self.resp = None
-
-    def openDs(self):
-        if self.orderDs: return self.orderDs
-        try:
-            self.orderDs = open(self.orderDsName, 'r')
-        except IOError, e:
-            print('Can not open orderDs file %s: %s' % (self.orderDsName, e))
-            exit(2)
-
-    def closeDs(self):
-        self.orderDs.close()
-
-    def loadOrderHead(self):
-        # colHead = self.orderDs.readline()
-        # self.aColHead = colHead.split()
-        self.aColHead = ('ICCID','IMSI','BILL_ID','EXPIRY')
-
-    def openRsp(self):
-        if self.resp: return self.resp
-        try:
-            self.resp = open(self.respName, 'w')
-        except IOError, e:
-            print('Can not open orderDs file %s: %s' % (self.respName, e))
-            exit(2)
-        return self.resp
-
-    def loadOrder(self):
-        # self.openDs()
-        for line in self.orderDs:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            aParams = line.split()
-            order = ReqOrder()
-            order.setParaName(self.aColHead)
-            order.setPara(aParams)
-            order.line = line
-            logging.debug('load order %s', line)
-            return order
-        return None
-        # self.closeDs()
-
-    def makeClient(self):
-        fCfg = self.cfg.openCfg()
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
-                continue
-            if line == '#kt sync server conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtSyncClt(self.cfg, self.cmdFile)
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        for clt in self.aClient:
-            # centrex.connectServer()
-            clt.loadCmd()
-            clt.makeCmdTempate()
-            clt.makeMsgHead()
-        return self.aClient
-
-    def start(self):
-        pass
-
-
 class Director(object):
-    def __init__(self, factory):
-        self.factory = factory
-        self.shutDown = None
-        self.fRsp = None
-
-    def saveOrderRsp(self, order):
-        self.fRsp.write('%s %s\r\n' % (order.line, order.aResp[0]))
-
-    def start(self):
-        client = self.factory.makeClient()[0]
-        self.factory.openDs()
-        self.factory.loadOrderHead()
-        self.fRsp = self.factory.openRsp()
-        # client.loadClient()
-        # client.loadCmd()
-        client.connectServer()
-        i = 0
-        while not self.shutDown:
-            logging.debug('timeer %f load order', time.time())
-            order = self.factory.loadOrder()
-            if order is None:
-                logging.info('load all orders,')
-                break
-            i += 1
-            client.connectServer()
-            client.sendOrder(order)
-            # client.recvResp(order)
-            # client.saveResp(order)
-            # client.remoteServer.close()
-            self.saveOrderRsp(order)
-        self.factory.closeDs()
-        self.fRsp.close()
-
+    def __init__(self):
+        pass
 
 class Conf(object):
     def __init__(self, cfgfile):
         self.cfgFile = cfgfile
         self.logLevel = None
         self.aClient = []
-        self.fCfg = None
 
     def loadLogLevel(self):
         try:
@@ -371,20 +55,6 @@ class Conf(object):
                 self.logLevel = eval(logLevel)
                 break
         fCfg.close()
-        return self.logLevel
-
-    def openCfg(self):
-        if self.fCfg: return self.fCfg
-        try:
-            self.fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        return self.fCfg
-
-    def closeCfg(self):
-        if self.fCfg: self.fCfg.close()
 
     def loadClient(self):
         # super(self.__class__, self).__init__()
@@ -401,9 +71,9 @@ class Conf(object):
         for line in fCfg:
             line = line.strip()
             if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
+                # clientSection = 0
+                # if client is not None: self.aClient.append(client)
+                # client = None
                 continue
             if line == '#provisioning client conf':
                 if clientSection == 1:
@@ -412,24 +82,32 @@ class Conf(object):
                     client = None
 
                 clientSection = 1
-                client = Centrex()
+                client = KtClient()
                 continue
             if clientSection < 1:
                 continue
             logging.debug(line)
             param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
+            if param[0] == 'prvnName':
+                client.ktName = param[1]
+            elif param[0] == 'dbusr':
+                client.dbUser = param[1]
+            elif param[0] == 'type':
+                client.ktType = param[1]
+            elif param[0] == 'dbpwd':
+                client.dbPwd = param[1]
+            elif param[0] == 'dbhost':
+                client.dbHost = param[1]
+            elif param[0] == 'dbport':
+                client.dbPort = param[1]
+            elif param[0] == 'dbsid':
+                client.dbSid = param[1]
+            elif param[0] == 'table':
+                client.orderTablePre = param[1]
+            elif param[0] == 'server':
+                client.syncServer = param[1]
             elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
+                client.sockPort = param[1]
         fCfg.close()
         logging.info('load %d clients.', len(self.aClient))
         return self.aClient
@@ -604,50 +282,55 @@ class KtClient(object):
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
-        dirName,appName = os.path.split(self.Name)
-        self.dirName = dirName
-        appFull,ext = os.path.splitext(self.Name)
-        self.appFull = appFull
-        self.appExt = ext
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
-        self.cfgFile = '%s.cfg' % self.appFull
-        # self.cmdFile = None
+        self.cfgFile = '%s.cfg' % self.Name
+        # self.logFile = 'psparse.log'
+        self.client = None
         self.caseDs = None
+        # self.resultOut = 'PS_MODEL_SUMMARY'
+        self.resultOut = 'PS_SYNCMODEL_SUMMARY'
 
     def checkArgv(self):
         if self.argc < 2:
+            print 'need pstable.'
             self.usage()
         # self.checkopt()
         argvs = sys.argv[1:]
-        # self.cmdFile = sys.argv[1]
         self.caseDs = sys.argv[1]
+        if self.argc == 3:
+            self.resultOut = sys.argv[2]
         self.logFile = '%s%s' % (self.caseDs, '.log')
-        self.resultOut = '%s%s' % (self.caseDs, '.rsp')
+        # self.outFile = '%s%s' % (self.caseDs, '.csv')
 
-    def buildCentrexClient(self):
-        logging.info('build centrex client.')
+    def buildKtClient(self):
+        logging.info('build kt client.')
         self.aKtClient = self.cfg.loadClient()
         for cli in self.aKtClient:
             cli.connDb()
             self.client = cli
 
     def usage(self):
-        print "Usage: %s datafile" % self.baseName
-        print "example:   %s %s" % (self.baseName,'teldata')
+        print "Usage: %s pstable" % self.baseName
+        print "example:   %s %s" % (self.baseName,'zg.ps_provision_his_100_201710')
         exit(1)
 
     def start(self):
         self.cfg = Conf(self.cfgFile)
-        self.logLevel = self.cfg.loadLogLevel()
+        self.cfg.loadLogLevel()
+        self.logLevel = self.cfg.logLevel
 
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        factory = KtSyncFac(self.cfg, self.caseDs)
-        director = Director(factory)
-        director.start()
+        self.buildKtClient()
+        # 'zg.ps_provision_his_100_201710'
+        parser = PsParser(self.client, self.caseDs, self.resultOut)
+        parser.makeParaModel()
+        parser.parsePs()
+        parser.checkResultTable()
+        parser.saveResult()
 
 
 # main here
