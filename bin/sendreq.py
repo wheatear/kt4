@@ -2,7 +2,7 @@
 
 """sendcentrex.py"""
 ######################################################################
-## Filename:      sendcentrex.py
+## Filename:      sendreq.py
 ##
 ## Version:       2.1
 ## Author:        wangxintian <wangxt5@asiainfo.com>
@@ -682,11 +682,9 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.cfgFile = '%s.cfg' % self.appFull
-        # self.logFile = 'psparse.log'
+        self.logFile = '%s.log' % self.appFull
         self.cmdFile = None
         self.caseDs = None
-        # self.resultOut = 'PS_MODEL_SUMMARY'
-        self.resultOut = 'PS_SYNCMODEL_SUMMARY'
 
     def checkArgv(self):
         if self.argc < 3:
@@ -697,13 +695,6 @@ class Main(object):
         self.caseDs = sys.argv[2]
         self.logFile = '%s%s' % (self.caseDs, '.log')
         self.resultOut = '%s%s' % (self.caseDs, '.rsp')
-
-    def buildCentrexClient(self):
-        logging.info('build centrex client.')
-        self.aKtClient = self.cfg.loadClient()
-        for cli in self.aKtClient:
-            cli.connDb()
-            self.client = cli
 
     def usage(self):
         print "Usage: %s cmdfile datafile" % self.baseName
@@ -718,15 +709,9 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        # self.buildCentrexClient()
-        # 'zg.ps_provision_his_100_201710'
         factory = CentrexFac(self.cfg, self.cmdFile, self.caseDs)
         director = Director(factory)
         director.start()
-        # parser.makeParaModel()
-        # parser.parsePs()
-        # parser.checkResultTable()
-        # parser.saveResult()
 
 
 # main here
