@@ -31,7 +31,6 @@ class HssUser(object):
         self.imsi = imsi
         self.client = client
         self.isHssUser = 0
-
     def qryHss(self):
         pass
 
@@ -316,6 +315,8 @@ class CmdTemplate(object):
         self.cmdTmpl = cmdMsg
         self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
 
+
+
 class CentrexClient(object):
     def __init__(self, cfg, cmdfile):
         self.cfg = cfg
@@ -538,6 +539,8 @@ class TelOrder(ReqOrder):
     #         status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
     #     return status
 
+
+
 class CentrexFac(object):
     def __init__(self, cfg, cmdFile, orderDs):
         self.cfg = cfg
@@ -634,6 +637,257 @@ class CentrexFac(object):
         return self.aClient
 
     def start(self):
+        pass
+
+
+class HttpFac(object):
+    def __init__(self, cfg, cmdFile, orderDs):
+        self.cfg = cfg
+        self.cmdFile = cmdFile
+        self.orderDsName = orderDs
+        self.orderDs = None
+        self.aClient = []
+        self.respName = '%s.rsp' % self.orderDsName
+        self.resp = None
+
+    def openDs(self):
+        if self.orderDs: return self.orderDs
+        try:
+            self.orderDs = open(self.orderDsName, 'r')
+        except IOError, e:
+            print('Can not open orderDs file %s: %s' % (self.orderDsName, e))
+            exit(2)
+
+    def closeDs(self):
+        self.orderDs.close()
+
+    def openRsp(self):
+        if self.resp: return self.resp
+        try:
+            self.resp = open(self.respName, 'w')
+        except IOError, e:
+            print('Can not open orderDs file %s: %s' % (self.respName, e))
+            exit(2)
+        return self.resp
+
+    def makeOrderHead(self):
+        colHead = self.orderDs.readline()
+        self.aColHead = colHead.split()
+
+    def makeTelOrder(self):
+        # self.openDs()
+        for line in self.orderDs:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            aParams = line.split()
+            order = TelOrder()
+            order.setParaName(self.aColHead)
+            order.setPara(aParams)
+            return order
+        return None
+        # self.closeDs()
+
+    def makeClient(self):
+        fCfg = self.cfg.openCfg()
+        clientSection = 0
+        client = None
+        for line in fCfg:
+            line = line.strip()
+            if len(line) == 0:
+                clientSection = 0
+                if client is not None: self.aClient.append(client)
+                client = None
+                continue
+            if line == '#centrex client conf':
+                if clientSection == 1:
+                    clientSection = 0
+                    if client is not None: self.aClient.append(client)
+                    client = None
+
+                clientSection = 1
+                client = CentrexClient(self.cfg, self.cmdFile)
+                continue
+            if clientSection < 1:
+                continue
+            logging.debug(line)
+            param = line.split(' = ', 1)
+            if param[0] == 'server':
+                client.serverIp = param[1]
+            elif param[0] == 'sockPort':
+                client.port = param[1]
+            elif param[0] == 'GLOBAL_USER':
+                client.user = param[1]
+            elif param[0] == 'GLOBAL_PASSWD':
+                client.passwd = param[1]
+            elif param[0] == 'GLOBAL_RTSNAME':
+                client.rtsname = param[1]
+            elif param[0] == 'GLOBAL_URL':
+                client.url = param[1]
+        fCfg.close()
+        logging.info('load %d clients.', len(self.aClient))
+        for centrex in self.aClient:
+            # centrex.connectServer()
+            centrex.loadCmd()
+            centrex.makeCmdTempate()
+            centrex.makeHttpHead()
+        return self.aClient
+
+    def start(self):
+        pass
+
+
+class HttpClient(object):
+    def __init__(self, cfg, cmdfile):
+        self.cfg = cfg
+        self.cmdFile = cmdfile
+        self.serverIp = None
+        self.port = None
+        self.url = None
+        self.user = None
+        self.passwd = None
+        # self.rtsname = None
+        self.aCmdTemplates = []
+        self.httpHead = None
+        self.httpBody = None
+        self.httpRequest = None
+        self.remoteServer = None
+
+    def loadCmd(self):
+        try:
+            cmd = open(self.cmdFile, 'r')
+        except IOError, e:
+            print('Can not open cmd file %s: %s' % (self.cmdFile, e))
+            exit(2)
+        tmpl = None
+        tmplMsg = ''
+        for line in cmd:
+            line = line.strip()
+            if len(line) == 0:
+                if len(tmplMsg) > 0:
+                    logging.info(tmplMsg)
+                    tmpl = CmdTemplate(tmplMsg)
+                    logging.info(tmpl.aVariables)
+                    self.aCmdTemplates.append(tmpl)
+                    tmpl = None
+                    tmplMsg = ''
+                continue
+            tmplMsg = '%s%s' % (tmplMsg, line)
+        if len(tmplMsg) > 0:
+            logging.info(tmplMsg)
+            tmpl = CmdTemplate(tmplMsg)
+            logging.info(tmpl.aVariables)
+            self.aCmdTemplates.append(tmpl)
+
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        cmd.close()
+
+    def loadClient(self):
+        fCfg = self.cfg.openCfg()
+        clientSection = 0
+        client = None
+        for line in fCfg:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line == '#centrex client conf':
+                clientSection = 1
+                continue
+            if clientSection < 1:
+                continue
+            logging.debug(line)
+            param = line.split(' = ', 1)
+            if param[0] == 'server':
+                self.serverIp = param[1]
+            elif param[0] == 'sockPort':
+                self.port = param[1]
+            elif param[0] == 'GLOBAL_USER':
+                self.user = param[1]
+            elif param[0] == 'GLOBAL_PASSWD':
+                self.passwd = param[1]
+            elif param[0] == 'GLOBAL_RTSNAME':
+                self.rtsname = param[1]
+            elif param[0] == 'GLOBAL_URL':
+                self.url = param[1]
+        fCfg.close()
+        # logging.info('load %d clients.', len(self.aClient))
+        # return self.aClient
+
+    def makeCmdTempate(self):
+        for tmpl in self.aCmdTemplates:
+            msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
+            msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
+            tmpl.setMsg(msg)
+
+    def makeHttpHead(self):
+        httpHead = 'POST /imsservice/services/CentrexService HTTP/1.1\r\n'
+        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<server^>:^<sockPort^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
+        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
+        httpHead = httpHead.replace('^<server^>', self.serverIp)
+        httpHead = httpHead.replace('^<sockPort^>', self.port)
+        self.httpHead = httpHead
+
+    def makeHttpMsg(self, order):
+        for tmpl in self.aCmdTemplates:
+            httpBody = tmpl.cmdTmpl
+            for var in tmpl.aVariables:
+                logging.debug('find var %s', var)
+                logging.debug('find var %s', order.dParam.keys())
+                if var not in order.dParam.keys():
+                    logging.debug('dont find var %s', var)
+                    logging.fatal('%s have no field %s.', order.dParam['BILL_ID'], var)
+                    return -1
+                paName = '^<%s^>' % var
+                if httpBody.find(paName) > -1:
+                    httpBody = httpBody.replace(paName, order.dParam[var])
+            contentLength = len(httpBody)
+            httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
+            httpRequest = '%s%s' % (httpHead, httpBody)
+            logging.debug(httpRequest)
+            order.aReqMsg.append(httpRequest)
+
+    def sendOrder(self, order):
+        self.makeHttpMsg(order)
+        # logging.debug(order.httpRequest)
+        for req in order.aReqMsg:
+            self.remoteServer.send(req)
+            self.recvResp(order)
+
+    def connectServer(self):
+        if self.remoteServer: self.remoteServer.close()
+        self.remoteServer = TcpClt(self.serverIp, int(self.port))
+        # self.remoteServer.connect()
+        return self.remoteServer
+
+    def recvResp(self, order):
+        logging.info('receive orders response...')
+        rspMsg = self.remoteServer.recv()
+        logging.debug(rspMsg)
+        logging.info('parse orders response...')
+        resp = {}
+        if rspMsg.find('<ns22:resultcode xmlns:ns22="http://msg.centrex.imsservice.chinamobile.com"><value>0</value></ns22:resultcode>') > -1:
+            resp['response'] = 'success'
+            resp['status'] = 'success'
+        else:
+            m = re.search(r'(<ns22:.+?Response.+</ns22:.+?Response>)', rspMsg)
+            if m is not None:
+                resp['response'] = m.group(1)
+            else:
+                resp['response'] = rspMsg
+            resp['status'] = 'fail'
+        order.aResp.append(resp)
+        logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+        # order.rspMsg = rspMsg
+
+    def saveResp(self, order):
         pass
 
 
