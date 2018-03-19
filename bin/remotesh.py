@@ -162,8 +162,52 @@ class Conf(object):
 
 
 class RemoteSh(multiprocessing.Process):
-    def __init__(self,cfg,cmdfile,dest):
+    def __init__(self, aCmds, hostName, hostIp, user, passwd, prompt):
         multiprocessing.Process.__init__(self)
+        self.aCmds = aCmds
+        self.hostName = hostName
+        self.hostIp = hostIp
+        self.user = user
+        self.passwd = passwd
+
+        # for hosts
+        # def runClient(self,float_ip,cluster_code,user_name,user_pw):
+        # for cluster
+    def run(self):
+        clt = pexpect.pxssh.pxssh()
+        flog = open('%s/pxssh_%s.log' % (self.cfg.logDir, self.hostName), 'w')
+        # clt.logfile = flog
+        clt.logfile = sys.stdout
+        logging.info('connect to host: %s %s %s', self.hostName, self.hostIp, self.user)
+        print 'connect to host: %s %s %s' % (self.hostName, self.hostIp, self.user)
+
+        # plain_pw = base64.decodestring(user_pw)
+        # con = clt.login(float_ip,user_name,plain_pw)
+        con = clt.login(self.hostIp, self.user, self.passwd)
+        logging.info('connect: %s', con)
+        cmdcontinue = 0
+        for cmd in self.aCmds:
+            logging.info('exec: %s', cmd)
+            print 'exec: %s' % (cmd)
+            cmd = cmd.replace('$USER', self.user)
+            clt.sendline(cmd)
+            if cmd[:2] == 'if':
+                cmdcontinue = 1
+            if cmd[0:2] == 'fi':
+                cmdcontinue = 0
+            if cmdcontinue == 1:
+                continue
+            clt.prompt()
+            logging.info('exec: %s', clt.before)
+        clt.logout()
+        # cltcmd = '/usr/bin/ksh -c "nohup /jfdata01/kt/operation/test/python/scandir/bin/scandirclient.py %s &"' % serv_ip
+        # # clt.sendline('/usr/bin/ksh -c "nohup /nms/scandir/bin/scandirclient.py &"')
+        # clt.sendline(cltcmd)
+        # clt.prompt()
+        # self.loger.writeLog('exec: %s' % (clt.before))
+
+class ReShFac(object):
+    def __init__(self,cfg,cmdfile,dest):
         self.cfg = cfg
         self.cmdFile = cmdfile
         self.dest = dest
@@ -182,6 +226,13 @@ class RemoteSh(multiprocessing.Process):
                 continue
             self.aCmds.append(line)
         fCmd.close()
+
+    def makeReSh(self):
+        logging.info('client starter(%d) running', os.getpid())
+        self.getLocalIp()
+        self.getAllHosts()
+        self.readCmd()
+        self.startAll()
 
     def run(self):
         # self.loger.openLog('%s/CLIENTCALLER.log' % self.cfg.logDir)
@@ -273,35 +324,118 @@ class RemoteSh(multiprocessing.Process):
         return self.localIp
 
 
+class Director(object):
+    def __init__(self, factory):
+        self.factory = factory
+        self.shutDown = None
+        self.fRsp = None
 
-class DirsManager(BaseManager):
-    pass
+    def saveOrderRsp(self, order):
+        self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
+
+    def start(self):
+        client = self.factory.makeClient()[0]
+        self.factory.openDs()
+        self.factory.makeOrderHead()
+        self.fRsp = self.factory.openRsp()
+        # client.loadClient()
+        # client.loadCmd()
+        i = 0
+        while not self.shutDown:
+            logging.debug('timeer %f load order', time.time())
+            order = self.factory.makeTelOrder()
+            if order is None:
+                logging.info('load all orders,')
+                break
+            i += 1
+            client.connectServer()
+            client.sendOrder(order)
+            # client.recvResp(order)
+            # client.saveResp(order)
+            client.remoteServer.close()
+            self.saveOrderRsp(order)
+        self.factory.closeDs()
+        self.fRsp.close()
 
 
+# def main():
+#     callName = sys.argv[0]
+#     cmdfile = sys.argv[1]
+#     dest = sys.argv[2]
+#     cfg = Conf(callName)
+#     logging.basicConfig(filename=cfg.logFile, level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s',datefmt='%Y%m%d%I%M%S')
+#     # loger = LogWriter(cfg)
+#     # logging.info('connect to oracle')
+#     # cfg.getDb()
+#     # baseName = os.path.basename(callName)
+#     # sysName = os.path.splitext(baseName)[0]
+#     # logFile = '%s/%s%s' % ('../log', sysName, '.log')
+#     # cfgFile = '%s.cfg' % 'scandir'
+#     # cfgFile = '%s.cfg' % 'scandir'
+#     # cfg = Conf(cfgFile)
+#     remoteShell = RemoteSh(cfg,cmdfile,dest)
+#     # remoteShell.loger = loger
+#     remoteShell.start()
+#
+#     remoteShell.join()
+#
+#     # dirManager = startManager()
+
+class Main(object):
+    def __init__(self):
+        self.Name = sys.argv[0]
+        dirName,appName = os.path.split(self.Name)
+        self.dirName = dirName
+        appFull,ext = os.path.splitext(self.Name)
+        self.appFull = appFull
+        self.appExt = ext
+        self.baseName = os.path.basename(self.Name)
+        self.argc = len(sys.argv)
+        self.cfgFile = '%s.cfg' % self.appFull
+        self.logFile = '%s.log' % self.appFull
+        self.cmdFile = None
+        self.caseDs = None
+
+    def checkArgv(self):
+        if self.argc < 2:
+            self.usage()
+        # self.checkopt()
+        argvs = sys.argv[1:]
+        self.cmdFile = sys.argv[1]
+        # self.caseDs = sys.argv[2]
+        # self.logFile = '%s%s' % (self.caseDs, '.log')
+        # self.resultOut = '%s%s' % (self.caseDs, '.rsp')
+
+    def usage(self):
+        print "Usage: %s cmdfile" % self.baseName
+        print "example:   %s %s" % (self.baseName,'mkdir.sh')
+        exit(1)
+
+    def start(self):
+        self.checkArgv()
+
+        self.cfg = Conf(self.cfgFile)
+        self.logLevel = self.cfg.loadLogLevel()
+
+        logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
+                            datefmt='%Y%m%d%I%M%S')
+        logging.info('%s starting...' % self.baseName)
+
+        factory = ReShFac(self.cfg, self.cmdFile, 'ALL')
+        # remoteShell.loger = loger
+        director = Director(factory)
+        director.start()
+
+        # remoteShell.join()
+
+        # factory = CentrexFac(self.cfg, self.cmdFile, self.caseDs)
+        # director = Director(factory)
+        # director.start()
 
 
-def main():
-    callName = sys.argv[0]
-    cmdfile = sys.argv[1]
-    dest = sys.argv[2]
-    cfg = Conf(callName)
-    logging.basicConfig(filename=cfg.logFile, level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s',datefmt='%Y%m%d%I%M%S')
-    # loger = LogWriter(cfg)
-    # logging.info('connect to oracle')
-    # cfg.getDb()
-    # baseName = os.path.basename(callName)
-    # sysName = os.path.splitext(baseName)[0]
-    # logFile = '%s/%s%s' % ('../log', sysName, '.log')
-    # cfgFile = '%s.cfg' % 'scandir'
-    # cfgFile = '%s.cfg' % 'scandir'
-    # cfg = Conf(cfgFile)
-    remoteShell = RemoteSh(cfg,cmdfile,dest)
-    # remoteShell.loger = loger
-    remoteShell.start()
-
-    remoteShell.join()
-
-    # dirManager = startManager()
-
+# main here
 if __name__ == '__main__':
-    main()
+    main = Main()
+    # main.checkArgv()
+    main.start()
+    logging.info('%s complete.', main.baseName)
