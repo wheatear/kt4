@@ -16,6 +16,7 @@ import pexpect.pxssh
 import base64
 import logging
 import re
+import sqlite3
 # from config import *
 
 
@@ -161,35 +162,48 @@ class Conf(object):
         return self.aClient
 
 
-class RemoteSh(multiprocessing.Process):
-    def __init__(self, aCmds, hostName, hostIp, user, passwd, prompt):
-        multiprocessing.Process.__init__(self)
-        self.aCmds = aCmds
+class ReHost(object):
+    def __init__(self, hostName, hostIp):
         self.hostName = hostName
         self.hostIp = hostIp
+        self.dUser = {}
+
+    def setUser(self, user, passwd, prompt):
+        self.dUser[user] = (passwd, prompt)
+
+
+class ReCmd(object):
+    def __init__(self, user, aCmds):
         self.user = user
-        self.passwd = passwd
+        self.aCmds = aCmds
+
+
+class RemoteSh(multiprocessing.Process):
+    def __init__(self, reCmd, reHost):
+        multiprocessing.Process.__init__(self)
+        self.reCmd = reCmd
+        self.host = reHost
 
         # for hosts
         # def runClient(self,float_ip,cluster_code,user_name,user_pw):
         # for cluster
     def run(self):
         clt = pexpect.pxssh.pxssh()
-        flog = open('%s/pxssh_%s.log' % (self.cfg.logDir, self.hostName), 'w')
+        flog = open('%s/remotesh_%s.log' % (self.cfg.logDir, self.host.hostName), 'w')
         # clt.logfile = flog
         clt.logfile = sys.stdout
-        logging.info('connect to host: %s %s %s', self.hostName, self.hostIp, self.user)
-        print 'connect to host: %s %s %s' % (self.hostName, self.hostIp, self.user)
+        logging.info('connect to host: %s %s %s', self.host.hostName, self.host.hostIp, self.reCmd.user)
+        print 'connect to host: %s %s %s' % (self.host.hostName, self.host.hostIp, self.reCmd.user)
 
         # plain_pw = base64.decodestring(user_pw)
         # con = clt.login(float_ip,user_name,plain_pw)
-        con = clt.login(self.hostIp, self.user, self.passwd)
+        con = clt.login(self.host.hostIp, self.reCmd.user, self.host.dUser[self.reCmd.user][0])
         logging.info('connect: %s', con)
         cmdcontinue = 0
-        for cmd in self.aCmds:
+        for cmd in self.reCmd.aCmds:
             logging.info('exec: %s', cmd)
             print 'exec: %s' % (cmd)
-            cmd = cmd.replace('$USER', self.user)
+            cmd = cmd.replace('$USER', self.reCmd.user)
             clt.sendline(cmd)
             if cmd[:2] == 'if':
                 cmdcontinue = 1
@@ -212,20 +226,33 @@ class ReShFac(object):
         self.cmdFile = cmdfile
         self.dest = dest
         self.aHosts = []
-        self.aCmds = []
+        # self.aCmds = []
         self.cmdUser = 'nms'
         self.cmdPwd = 'ailk,123'
 
-    def readCmd(self):
+    def makeCmd(self):
         fCmd = open(self.cmdFile,'r')
+        i = 0
+        user = None
+        aCmds = []
         for line in fCmd:
             line = line.strip()
             if len(line) == 0:
                 continue
+            i += 1
+            if i == 1:
+                aUser = line.split(' ')
+                if len(aUser) < 2:
+                    logging.warn('comd no user,exit!')
+                    exit(1)
+                user = aUser[1]
+
             if line[0] == '#':
                 continue
-            self.aCmds.append(line)
+            aCmds.append(line)
         fCmd.close()
+        cmd = ReCmd(user, aCmds)
+        return cmd
 
     def makeReSh(self):
         logging.info('client starter(%d) running', os.getpid())
@@ -243,29 +270,32 @@ class ReShFac(object):
         self.startAll()
         # self.asyncAll()
 
-    def getAllHosts(self):
+    def makeAllHosts(self):
         # for host
         # fHosts = open(self.cfg.hostClu, 'r')
         # for cluster
-        if self.dest == '-c':
-            hostFile = self.cfg.cluster
-        elif self.dest == '-h':
-            hostFile = self.cfg.hostClu
-        print hostFile
-        fHosts = open(hostFile, 'r')
-        for line in fHosts:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            aLine = line.split(' ')
-            if self.dest == '-c':
-                aInfo = aLine
-            elif self.dest == '-h':
-                aInfo = [aLine[1],aLine[0],aLine[2],aLine[3]]
-            if aInfo[1] == self.localIp:
-                continue
-            self.aHosts.append(aInfo)
-        fHosts.close()
+        conn = sqlite3.connect('kthosts.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT hostname,hostip FROM kthosts')
+        rows = cursor.fetchall()
+        dHosts = {}
+        for row in rows:
+            host = ReHost(*row)
+            dHosts[row[0]] = host
+        # cursor.close()
+        userSql = 'select hostname,user,passwd,prompt from hostuser'
+        cursor.execute(userSql)
+        rows = cursor.fetchall()
+        for row in rows:
+            hostName = row[0]
+            user = row[1]
+            passwd = row[2]
+            prompt = row[3]
+            dHosts[hostName].setUser(user, passwd, prompt)
+
+        cursor.close()
+        conn.close()
+        return dHosts
 
     def startAll(self):
         logging.info('all host to connect: %s' , self.aHosts)
@@ -334,7 +364,7 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        client = self.factory.makeClient()[0]
+        scmd = self.factory.makeClient()[0]
         self.factory.openDs()
         self.factory.makeOrderHead()
         self.fRsp = self.factory.openRsp()
