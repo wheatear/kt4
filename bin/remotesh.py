@@ -204,6 +204,15 @@ class RemoteSh(multiprocessing.Process):
             logging.info('exec: %s', cmd)
             print 'exec: %s' % (cmd)
             cmd = cmd.replace('$USER', self.reCmd.user)
+            if cmd[:2]=='su':
+                suUser = cmd[3:]
+                suPwd = self.host.dUser[suUser][0]
+                su = self.doSu(clt, cmd, suPwd)
+                if su:
+                    continue
+                else:
+                    continue
+
             clt.sendline(cmd)
             if cmd[:2] == 'if':
                 cmdcontinue = 1
@@ -220,6 +229,31 @@ class RemoteSh(multiprocessing.Process):
         # clt.prompt()
         # self.loger.writeLog('exec: %s' % (clt.before))
 
+    def suSh(self, clt, suCmd, pwd):
+        clt.sendline(suCmd)
+        i = clt.expect(['密码：',pexpect.TIMEOUT,pexpect.EOF])
+        if i==0:
+            clt.sendline(pwd)
+            i = self.clt(["(?i)are you sure you want to continue connecting", pexpect.original_prompt,
+                             "(?i)(?:password)|(?:passphrase for key)", "(?i)permission denied", "(?i)terminal type",
+                             pexpect.TIMEOUT])
+        else:
+            clt.close()
+            raise pexpect.ExceptionPxssh('unexpected su response ')
+
+        if i==1:
+            pass
+        else:
+            clt.close()
+            raise pexpect.ExceptionPxssh('unexpected login response')
+        if clt.auto_prompt_reset:
+            if not clt.set_unique_prompt():
+                clt.close()
+                raise pexpect.ExceptionPxssh('could not set shell prompt '
+                                     '(received: %r, expected: %r).' % (
+                                         self.before, self.PROMPT,))
+        return True
+
 class ReShFac(object):
     def __init__(self,cfg,cmdfile,dest):
         self.cfg = cfg
@@ -229,6 +263,7 @@ class ReShFac(object):
         # self.aCmds = []
         self.cmdUser = 'nms'
         self.cmdPwd = 'ailk,123'
+        self.localIp = None
 
     def makeCmd(self):
         fCmd = open(self.cmdFile,'r')
@@ -365,27 +400,27 @@ class Director(object):
 
     def start(self):
         scmd = self.factory.makeClient()[0]
-        self.factory.openDs()
-        self.factory.makeOrderHead()
-        self.fRsp = self.factory.openRsp()
-        # client.loadClient()
-        # client.loadCmd()
+        localIp = self.factory.getLocalIp()
+        dHosts = self.factory.makeAllHosts()
+
         i = 0
-        while not self.shutDown:
-            logging.debug('timeer %f load order', time.time())
-            order = self.factory.makeTelOrder()
-            if order is None:
-                logging.info('load all orders,')
-                break
+        aReSh = []
+        for hostName in dHosts:
+            if host.hostIp == localIp:
+                continue
             i += 1
-            client.connectServer()
-            client.sendOrder(order)
-            # client.recvResp(order)
-            # client.saveResp(order)
-            client.remoteServer.close()
-            self.saveOrderRsp(order)
-        self.factory.closeDs()
-        self.fRsp.close()
+            logging.debug('timeer %f host %s', (time.time(), hostName))
+            host = dHosts[hostName]
+            reSh = self.factory.makeReSh(host, scmd)
+            aReSh.append(reSh)
+            reSh.start()
+        logging.info('start %d remotesh.', i)
+
+        for reSh in aReSh:
+            reSh.join()
+            logging.info('host %s cmd completed.', reSh.host.hostName)
+        logging.info('all %d remotesh completed.', i)
+
 
 
 # def main():
