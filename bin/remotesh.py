@@ -1,3 +1,6 @@
+#!/app/kt4/local/python2.7/bin/python
+# -*- coding: utf-8 -*-
+
 #!/usr/bin/env python
 """emergency provisioning ps control model"""
 
@@ -189,7 +192,7 @@ class RemoteSh(multiprocessing.Process):
         # for cluster
     def run(self):
         clt = pexpect.pxssh.pxssh()
-        flog = open('%s/remotesh_%s.log' % (self.cfg.logDir, self.host.hostName), 'w')
+        # flog = open('%s/remotesh_%s.log' % (self.cfg.logDir, self.host.hostName), 'w')
         # clt.logfile = flog
         clt.logfile = sys.stdout
         logging.info('connect to host: %s %s %s', self.host.hostName, self.host.hostIp, self.reCmd.user)
@@ -229,7 +232,7 @@ class RemoteSh(multiprocessing.Process):
         # clt.prompt()
         # self.loger.writeLog('exec: %s' % (clt.before))
 
-    def suSh(self, clt, suCmd, pwd):
+    def doSu(self, clt, suCmd, pwd):
         clt.sendline(suCmd)
         i = clt.expect(['密码：',pexpect.TIMEOUT,pexpect.EOF])
         if i==0:
@@ -281,6 +284,7 @@ class ReShFac(object):
                     logging.warn('comd no user,exit!')
                     exit(1)
                 user = aUser[1]
+                continue
 
             if line[0] == '#':
                 continue
@@ -289,12 +293,10 @@ class ReShFac(object):
         cmd = ReCmd(user, aCmds)
         return cmd
 
-    def makeReSh(self):
-        logging.info('client starter(%d) running', os.getpid())
-        self.getLocalIp()
-        self.getAllHosts()
-        self.readCmd()
-        self.startAll()
+    def makeReSh(self, host, cmd):
+        logging.info('create remote shell of %s', host.hostName)
+        reSh = RemoteSh(cmd, host)
+        return reSh
 
     def run(self):
         # self.loger.openLog('%s/CLIENTCALLER.log' % self.cfg.logDir)
@@ -399,17 +401,18 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        scmd = self.factory.makeClient()[0]
-        localIp = self.factory.getLocalIp()
+        scmd = self.factory.makeCmd()
+        # localIp = self.factory.getLocalIp()
         dHosts = self.factory.makeAllHosts()
+        localHost = socket.gethostname()
 
         i = 0
         aReSh = []
         for hostName in dHosts:
-            if host.hostIp == localIp:
+            if hostName == localHost:
                 continue
             i += 1
-            logging.debug('timeer %f host %s', (time.time(), hostName))
+            logging.debug('timeer %f host %s', time.time(), hostName)
             host = dHosts[hostName]
             reSh = self.factory.makeReSh(host, scmd)
             aReSh.append(reSh)
