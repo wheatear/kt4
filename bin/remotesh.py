@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 #!/app/kt4/local/python2.7/bin/python
 # -*- coding: utf-8 -*-
 
@@ -376,24 +379,26 @@ class Main(object):
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
+        # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
         appNameBody, appNameExt = os.path.splitext(appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
 
-        if dirBin=='':
+        if dirBin=='' or dirBin=='.':
             dirBin = '.'
             dirApp = '..'
             self.dirBin = dirBin
             self.dirApp = dirApp
         else:
-            dirApp, dirBinName = os.path.split(self.Name)
+            dirApp, dirBinName = os.path.split(dirBin)
             if dirApp=='':
                 dirApp = '.'
+                self.dirBin = dirBin
                 self.dirApp = dirApp
-        self.dirLog = os.path.join(dirApp, 'log')
-        self.dirCfg = os.path.join(dirApp, 'config')
-        self.dirTpl = os.path.join(dirApp, 'template')
-        self.dirLib = os.path.join(dirApp, 'lib')
+        self.dirLog = os.path.join(self.dirApp, 'log')
+        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirLib = os.path.join(self.dirApp, 'lib')
 
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s.log' % self.appNameBody
