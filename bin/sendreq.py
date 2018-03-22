@@ -928,17 +928,46 @@ class Director(object):
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
-        dirName,appName = os.path.split(self.Name)
-        self.dirName = dirName
-        appFull,ext = os.path.splitext(self.Name)
-        self.appFull = appFull
-        self.appExt = ext
-        self.baseName = os.path.basename(self.Name)
-        self.argc = len(sys.argv)
-        self.cfgFile = '%s.cfg' % self.appFull
-        self.logFile = '%s.log' % self.appFull
+        # dirName,appName = os.path.split(self.Name)
+        # self.dirName = dirName
+        # appFull,ext = os.path.splitext(self.Name)
+        # self.appFull = appFull
+        # self.appExt = ext
+        # self.baseName = os.path.basename(self.Name)
+        # self.argc = len(sys.argv)
+        # self.cfgFile = '%s.cfg' % self.appFull
+        # self.logFile = '%s.log' % self.appFull
         self.cmdFile = None
         self.caseDs = None
+
+    def parseWorkEnv(self):
+        dirBin, appName = os.path.split(self.Name)
+        # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
+        appNameBody, appNameExt = os.path.splitext(appName)
+        self.appNameBody = appNameBody
+        self.appNameExt = appNameExt
+
+        if dirBin=='' or dirBin=='.':
+            dirBin = '.'
+            dirApp = '..'
+            self.dirBin = dirBin
+            self.dirApp = dirApp
+        else:
+            dirApp, dirBinName = os.path.split(dirBin)
+            if dirApp=='':
+                dirApp = '.'
+                self.dirBin = dirBin
+                self.dirApp = dirApp
+        self.dirLog = os.path.join(self.dirApp, 'log')
+        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirLib = os.path.join(self.dirApp, 'lib')
+
+        cfgName = '%s.cfg' % self.appNameBody
+        logName = '%s.log' % self.appNameBody
+        self.cfgFile = os.path.join(self.dirCfg, cfgName)
+        self.logFile = os.path.join(self.dirLog, logName)
+        self.logPre = os.path.join(self.dirLog, self.appNameBody)
 
     def checkArgv(self):
         if self.argc < 3:
@@ -956,6 +985,9 @@ class Main(object):
         exit(1)
 
     def start(self):
+        self.parseWorkEnv()
+        self.checkArgv()
+
         self.cfg = Conf(self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
 
@@ -971,6 +1003,6 @@ class Main(object):
 # main here
 if __name__ == '__main__':
     main = Main()
-    main.checkArgv()
+    # main.checkArgv()
     main.start()
     logging.info('%s complete.', main.baseName)
