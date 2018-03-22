@@ -1,11 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-#!/app/kt4/local/python2.7/bin/python
-# -*- coding: utf-8 -*-
-
-#!/usr/bin/env python
-"""emergency provisioning ps control model"""
+"""remote shell"""
 
 import sys
 import os
@@ -192,7 +188,7 @@ class RemoteSh(multiprocessing.Process):
         self.logPre = logPre
 
     def run(self):
-        logging.info('remote shell of host %s running in pid:%d', self.host.hostName, os.getpid())
+        logging.info('remote shell of host %s running in pid:%d %s', self.host.hostName, os.getpid(), self.name)
         clt = pexpect.pxssh.pxssh()
         flog = open('%s_%s.log' % (self.logPre, self.host.hostName), 'a')
         clt.logfile = flog
@@ -209,15 +205,19 @@ class RemoteSh(multiprocessing.Process):
             logging.info('exec: %s', cmd)
             # print 'exec: %s' % (cmd)
             cmd = cmd.replace('$USER', self.reCmd.user)
-            if cmd[:2]=='su':
-                suUser = cmd[3:]
+            if cmd[:5]=='su - ':
+                suUser = cmd.split(' ')[2]
                 suPwd = self.host.dUser[suUser][0]
                 su = self.doSu(clt, cmd, suPwd)
                 if su:
                     continue
                 else:
-                    continue
+                    logging.fatal('cmd su error,exit')
+                    break
 
+            if cmd[:5] == 'su ex':
+                self.suExit(clt)
+                continue
             clt.sendline(cmd)
             if cmd[:2] == 'if':
                 cmdcontinue = 1
@@ -230,30 +230,32 @@ class RemoteSh(multiprocessing.Process):
         clt.logout()
         flog.close()
 
-    def doSu(self, clt, suCmd, pwd):
+    def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
         clt.sendline(suCmd)
-        i = clt.expect(['密码：',pexpect.TIMEOUT,pexpect.EOF])
+        i = clt.expect(['密码：|Password:',pexpect.TIMEOUT,pexpect.EOF])
         if i==0:
             clt.sendline(pwd)
-            i = self.clt(["(?i)are you sure you want to continue connecting", pexpect.original_prompt,
-                             "(?i)(?:password)|(?:passphrase for key)", "(?i)permission denied", "(?i)terminal type",
-                             pexpect.TIMEOUT])
+            i = clt.expect(["su: 鉴定故障", r"[#$]", pexpect.TIMEOUT])
         else:
             clt.close()
-            raise pexpect.ExceptionPxssh('unexpected su response ')
-
+            # raise pexpect.ExceptionPxssh('unexpected su response ')
+            return False
         if i==1:
             pass
         else:
             clt.close()
             raise pexpect.ExceptionPxssh('unexpected login response')
-        if clt.auto_prompt_reset:
+        if auto_prompt_reset:
             if not clt.set_unique_prompt():
                 clt.close()
                 raise pexpect.ExceptionPxssh('could not set shell prompt '
                                      '(received: %r, expected: %r).' % (
-                                         self.before, self.PROMPT,))
+                                         clt.before, clt.PROMPT,))
         return True
+
+    def suExit(self, clt):
+        clt.sendline('exit')
+        clt.prompt()
 
 class ReShFac(object):
     def __init__(self, main, cmdfile, dest):
