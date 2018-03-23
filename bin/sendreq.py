@@ -962,12 +962,17 @@ class Main(object):
         self.dirCfg = os.path.join(self.dirApp, 'config')
         self.dirTpl = os.path.join(self.dirApp, 'template')
         self.dirLib = os.path.join(self.dirApp, 'lib')
+        self.dirInput = os.path.join(self.dirApp, 'input')
+        self.dirOutput = os.path.join(self.dirApp, 'output')
 
+        # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
+        self.today = time.strftime("%Y%m%d", time.localtime())
         cfgName = '%s.cfg' % self.appNameBody
-        logName = '%s.log' % self.appNameBody
+        logName = '%s_%s.log' % (self.appNameBody, self.today)
+        logNamePre = '%s_%s' % (self.appNameBody, self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
-        self.logPre = os.path.join(self.dirLog, self.appNameBody)
+        self.logPre = os.path.join(self.dirLog, logNamePre)
 
     def checkArgv(self):
         if self.argc < 3:
