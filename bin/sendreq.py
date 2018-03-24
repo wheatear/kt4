@@ -23,7 +23,6 @@ import signal
 import logging
 from socket import *
 
-ls = os.linesep
 
 class HssUser(object):
     def __init__(self, msisdn, imsi, client):
@@ -39,15 +38,11 @@ class Conf(object):
     def __init__(self, cfgfile):
         self.cfgFile = cfgfile
         self.logLevel = None
-        self.aClient = []
         self.fCfg = None
+        self.dNet = {}
 
     def loadLogLevel(self):
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            print('Can not open configuration file %s: %s' % (self.cfgFile, e))
-            exit(2)
+        fCfg = self.openCfg()
         for line in fCfg:
             line = line.strip()
             if len(line) == 0:
@@ -75,53 +70,33 @@ class Conf(object):
     def closeCfg(self):
         if self.fCfg: self.fCfg.close()
 
-    def loadClient(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        clientSection = 0
-        client = None
+    def loadNet(self):
+        fCfg = self.openCfg()
+        netSection = 0
+        net = None
         for line in fCfg:
             line = line.strip()
             if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
+                if net is not None: self.dNet[net['netCode']] = net
+                net = None
+                netSection = 0
                 continue
-            if line == '#provisioning client conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
+            if line[:7] == '#NetCode':
+                if net is not None: self.dNet[net['netCode']] = net
+                net = None
 
-                clientSection = 1
-                client = Centrex()
+                netSection = 1
+                net = {}
                 continue
-            if clientSection < 1:
+            if netSection < 1:
                 continue
             logging.debug(line)
             param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
+            net[param[0]] = param[1]
+
+        self.closeCfg()
+        logging.info('load %d net.', len(self.dNet))
+        return self.dNet
 
     def loadEnv(self):
         # super(self.__class__, self).__init__()
@@ -469,13 +444,30 @@ class CentrexClient(object):
     def saveResp(self, order):
         pass
 
+
+
+class NeFac(object):
+    def _init__(self, main, cmdFile, orderDs):
+        self.main = main
+        self.cmdFile = cmdFile
+        self.orderDsName = orderDs
+        self.orderDs = None
+        self.aClient = []
+        self.respName = '%s.rsp' % self.orderDsName
+        self.resp = None
+
+
+class NeClient(object):
+    pass
+
+
 class ReqOrder(object):
     def __init__(self):
         self.no = None
+        self.aParamName = []
         self.dParam = {}
         self.aReqMsg = []
         self.aResp = []
-        self.aParamName = []
 
     def setParaName(self, aParaNames):
         self.aParamName = aParaNames
@@ -495,50 +487,11 @@ class ReqOrder(object):
 class TelOrder(ReqOrder):
     def __init__(self):
         super(self.__class__, self).__init__()
-        # self.no = None
-        # self.dParam = {}
-        # self.aReqMsg = []
-        # self.aResp = []
         self.dParam['BILL_ID'] = None
         self.dParam['USERLOCKFLG'] = 0
         self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = None
         self.dParam['POSTCODE'] = '10'
         self.dParam['ServiceType'] = 0
-
-    # def setPara(self, paras):
-    #     self.dParam['BILL_ID'] = paras[0]
-    #     self.dParam['USERLOCKFLG'] = paras[1]
-    #     self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = paras[2]
-    #     self.dParam['POSTCODE'] = paras[3]
-    #     self.dParam['ServiceType'] = paras[4]
-    #     self.dParam['CallingLineIdentificationPresentation'] = paras[5]
-    #     self.dParam['CallingLineIdentificationRestriction'] = paras[6]
-    #     self.dParam['CallingLineIdentificationRestrictionOverride'] = paras[7]
-    #     self.dParam['CallWaiting'] = paras[8]
-    #     self.dParam['CallHold'] = paras[9]
-    #     self.dParam['CallForwardingUnconditional'] = paras[10]
-    #     self.dParam['CallForwardingBusy'] = paras[11]
-    #     self.dParam['CallForwardingNoReply'] = paras[12]
-    #     self.dParam['CallForwardingOffline'] = paras[13]
-    #     self.dParam['CallBarring'] = paras[14]
-    #     self.dParam['DoNotDisturb'] = paras[15]
-    #     self.dParam['SettingServiceOverstep'] = paras[16]
-    #     self.dParam['BlindCallTransfer'] = paras[17]
-    #     self.dParam['ConsultativeCallTransfer'] = paras[18]
-    #     self.dParam['ThreePartyService'] = paras[19]
-    #     self.dParam['VirtualAttendantConsole'] = paras[20]
-    #     self.dParam['AttendantEnb'] = paras[21]
-    #     self.dParam['Fax'] = paras[22]
-    #     self.dParam['CallContinue'] = paras[23]
-    #     self.dParam['ConvenientNumber'] = paras[24]
-    #     self.dParam['CTD'] = paras[25]
-
-    # def getStatus(self):
-    #     status = ''
-    #     for resp in self.aResp:
-    #         status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
-    #     return status
-
 
 
 class CentrexFac(object):
@@ -939,6 +892,7 @@ class Main(object):
         # self.logFile = '%s.log' % self.appFull
         self.cmdFile = None
         self.caseDs = None
+        self.netType = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -980,7 +934,7 @@ class Main(object):
         # self.checkopt()
         argvs = sys.argv[1:]
         self.cmdFile = sys.argv[1]
-        self.caseDs = sys.argv[2]
+        self.inDs = sys.argv[2]
         self.logFile = '%s%s' % (self.caseDs, '.log')
         self.resultOut = '%s%s' % (self.caseDs, '.rsp')
 
@@ -988,6 +942,26 @@ class Main(object):
         print "Usage: %s cmdfile datafile" % self.baseName
         print "example:   %s %s" % (self.baseName,'creatUser teldata')
         exit(1)
+
+    def makeFactory(self):
+        if not self.fCmd:
+            try:
+                self.fCmd = open(self.cmdFile, 'r')
+            except IOError, e:
+                logging.fatal('can not open command file %s', self.cmdFile)
+                logging.fatal('exit.')
+                exit(2)
+        for line in fCmd:
+            if line[:8] == '#NETTYPE':
+                aType = line.split(' ')
+                self.netType = aType[1]
+        if self.netType is None:
+            logging.fatal('no find net type,exit.')
+            exit(3)
+        facName = '%sFac' % self.netType
+        fac_meta = getattr(self.appNameBody, facName)
+        fac = fac_meta(self, self.fCmd, self.caseDs)
+        return fac
 
     def start(self):
         self.parseWorkEnv()
@@ -1000,7 +974,7 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        factory = CentrexFac(self.cfg, self.cmdFile, self.caseDs)
+        factory = self.makeFactory(self.cfg, self.cmdFile, self.caseDs)
         director = Director(factory)
         director.start()
 
