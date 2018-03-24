@@ -77,17 +77,27 @@ class Conf(object):
         for line in fCfg:
             line = line.strip()
             if len(line) == 0:
-                if net is not None: self.dNet[net['netCode']] = net
+                if net is not None:
+                    netType = net['NETTYPE']
+                    if len(self.dNet[netType]) == 0:
+                        self.dNet[netType] = [net]
+                    else:
+                        self.dNet[netType].append(net)
                 net = None
                 netSection = 0
                 continue
-            if line[:7] == '#NetCode':
-                if net is not None: self.dNet[net['netCode']] = net
+            if line[:7] == '#NETTYPE':
+                if net is not None:
+                    netType = net['NETTYPE']
+                    if len(self.dNet[netType]) == 0:
+                        self.dNet[netType] = [net]
+                    else:
+                        self.dNet[netType].append(net)
                 net = None
 
                 netSection = 1
                 net = {}
-                continue
+                line = line[1:]
             if netSection < 1:
                 continue
             logging.debug(line)
@@ -446,19 +456,194 @@ class CentrexClient(object):
 
 
 
-class NeFac(object):
-    def _init__(self, main, cmdFile, orderDs):
+class NetFac(object):
+    def _init__(self, main, netType, cmdFile, orderDs):
+        self.netType = netType
         self.main = main
         self.cmdFile = cmdFile
         self.orderDsName = orderDs
         self.orderDs = None
-        self.aClient = []
+        self.aNetInfo = []
+        self.dNetClient = {}
         self.respName = '%s.rsp' % self.orderDsName
         self.resp = None
 
+    def openDs(self):
+        if self.orderDs: return self.orderDs
+        self.orderDs = self.main.openFile(self.orderDsName, 'r')
+        if self.orderDs is None:
+            logging.fatal('Can not open orderDs file %s.', self.orderDsName)
+            exit(2)
+        return self.orderDs
 
-class NeClient(object):
-    pass
+    def closeDs(self):
+        if self.orderDs:
+            self.orderDs.close()
+
+    def openRsp(self):
+        if self.resp: return self.resp
+        self.resp = self.main.openFile(self.respName, 'w')
+        if self.orderDs is None:
+            logging.fatal('Can not open response file %s.', self.respName)
+            exit(2)
+        return self.resp
+
+    def makeOrderFildName(self):
+        fildName = self.orderDs.readline()
+        self.aFildName = fildName.split()
+
+    def makeOrder(self):
+        for line in self.orderDs:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            aParams = line.split()
+            order = ReqOrder()
+            order.setParaName(self.aFildName)
+            order.setPara(aParams)
+            order.net = self.dNetClient[0]
+            return order
+        return None
+
+    def makeNet(self):
+        cfg = self.main.cfg
+        aNetInfo = cfg.dNet[self.netType]
+        logging.info('load %d net info.', len(aNetInfo))
+        for netInfo in self.aNetInfo:
+            net = NetClient(netInfo, self.main.fCmd)
+            net.loadCmd()
+            net.tmplReplaceNetInfo()
+            net.makeHttpHead()
+            self.dNetClient[netInfo['NetCode']] = net
+        return self.dNetClient
+
+
+class NetClient(object):
+    def __init__(self, netInfo, cmdfile):
+        self.dNetInfo = netInfo
+        self.fCmd = cmdfile
+        self.httpHead = None
+        self.httpRequest = None
+        self.aCmdTemplates = []
+        self.httpHead = None
+        self.httpBody = None
+        self.remoteServer = None
+
+    def loadCmd(self):
+        tmpl = None
+        tmplMsg = ''
+        for line in self.fCmd:
+            line = line.strip()
+            if len(line) == 0:
+                if len(tmplMsg) > 0:
+                    logging.info(tmplMsg)
+                    tmpl = CmdTemplate(tmplMsg)
+                    logging.info(tmpl.aVariables)
+                    self.aCmdTemplates.append(tmpl)
+                    tmpl = None
+                    tmplMsg = ''
+                continue
+            tmplMsg = '%s%s' % (tmplMsg, line)
+        if len(tmplMsg) > 0:
+            logging.info(tmplMsg)
+            tmpl = CmdTemplate(tmplMsg)
+            logging.info(tmpl.aVariables)
+            self.aCmdTemplates.append(tmpl)
+
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        self.fCmd.close()
+
+    # def makeCmdTempate(self):
+    #     for tmpl in self.aCmdTemplates:
+    #         msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
+    #         msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
+    #         tmpl.setMsg(msg)
+
+    def tmplReplaceNetInfo(self):
+        for var in self.dNetInfo:
+            varPlace = '^<%s^>' % var
+            for tmpl in self.aCmdTemplates:
+                if var in tmpl.aVariables:
+                    msg = tmpl.cmdTmpl.replace(varPlace, self.dNetInfo[var])
+                    tmpl.setMsg(msg)
+
+    def httpheadReplaceNetInfo(self):
+        for var in self.dNetInfo:
+            varPlace = '^<%s^>' % var
+            if varPlace in self.httpHead:
+                httpHead = httpHead.replace(varPlace, self.dNetInfo[var])
+                self.httpHead = httpHead
+
+    def makeHttpHead(self):
+        httpHead = 'POST ^<GLOBAL_URL^> HTTP/1.1\r\n'
+        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<Ip^>:^<Port^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
+        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
+        self.httpHead = httpHead
+        self.httpheadReplaceNetInfo()
+
+    def makeHttpMsg(self, order):
+        for tmpl in self.aCmdTemplates:
+            httpBody = tmpl.cmdTmpl
+            for var in tmpl.aVariables:
+                logging.debug('find var %s', var)
+                logging.debug('find var %s', order.dParam.keys())
+                if var not in order.dParam:
+                    logging.debug('dont find var %s', var)
+                    logging.fatal('%s order have no field %s.', order.dParam['BILL_ID'], var)
+                    return -1
+                paName = '^<%s^>' % var
+                if httpBody.find(paName) > -1:
+                    httpBody = httpBody.replace(paName, order.dParam[var])
+            contentLength = len(httpBody)
+            httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
+            httpRequest = '%s%s' % (httpHead, httpBody)
+            logging.debug(httpRequest)
+            order.aReqMsg.append(httpRequest)
+
+    def sendOrder(self, order):
+        self.makeHttpMsg(order)
+        # logging.debug(order.httpRequest)
+        for req in order.aReqMsg:
+            self.remoteServer.send(req)
+            self.recvResp(order)
+
+    def connectServer(self):
+        # if self.remoteServer: self.remoteServer.close()
+        if self.remoteServer: return self.remoteServer
+        self.remoteServer = TcpClt(self.dNetInfo['Ip'], int(self.dNetInfo['Port']))
+        return self.remoteServer
+
+    def recvResp(self, order):
+        logging.info('receive orders response...')
+        rspMsg = self.remoteServer.recv()
+        logging.debug(rspMsg)
+        logging.info('parse orders response...')
+        resp = {}
+        resp['response'] = 'rspMsg'
+        resp['status'] = 'UNKNOWN'
+        if 'RSP_SUCCESS' not in self.dNetInfo:
+            order.aResp.append(resp)
+            logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+            return True
+
+        if rspMsg.find(self.dNetInfo['RSP_SUCCESS']) > -1:
+            resp['response'] = 'success'
+            resp['status'] = 'success'
+        else:
+            resp['status'] = 'fail'
+        order.aResp.append(resp)
+        logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+        # order.rspMsg = rspMsg
+        return True
+
 
 
 class ReqOrder(object):
@@ -466,6 +651,7 @@ class ReqOrder(object):
         self.no = None
         self.aParamName = []
         self.dParam = {}
+        self.net = None
         self.aReqMsg = []
         self.aResp = []
 
@@ -854,7 +1040,7 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        client = self.factory.makeClient()[0]
+        self.factory.makeNet()
         self.factory.openDs()
         self.factory.makeOrderHead()
         self.fRsp = self.factory.openRsp()
@@ -863,7 +1049,8 @@ class Director(object):
         i = 0
         while not self.shutDown:
             logging.debug('timeer %f load order', time.time())
-            order = self.factory.makeTelOrder()
+            order = self.factory.makeOrder()
+            client = order.net
             if order is None:
                 logging.info('load all orders,')
                 break
@@ -881,15 +1068,6 @@ class Director(object):
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
-        # dirName,appName = os.path.split(self.Name)
-        # self.dirName = dirName
-        # appFull,ext = os.path.splitext(self.Name)
-        # self.appFull = appFull
-        # self.appExt = ext
-        # self.baseName = os.path.basename(self.Name)
-        # self.argc = len(sys.argv)
-        # self.cfgFile = '%s.cfg' % self.appFull
-        # self.logFile = '%s.log' % self.appFull
         self.cmdFile = None
         self.caseDs = None
         self.netType = None
@@ -943,24 +1121,31 @@ class Main(object):
         print "example:   %s %s" % (self.baseName,'creatUser teldata')
         exit(1)
 
+    def openFile(self, fileName, mode):
+        try:
+            f = open(fileName, mode)
+        except IOError, e:
+            logging.fatal('open file %s error: %s', fileName, e)
+            return None
+        return f
+
     def makeFactory(self):
         if not self.fCmd:
-            try:
-                self.fCmd = open(self.cmdFile, 'r')
-            except IOError, e:
-                logging.fatal('can not open command file %s', self.cmdFile)
-                logging.fatal('exit.')
+            self.fCmd = self.openFile(self.cmdFile, 'r')
+            if not self.fCmd:
+                logging.fatal('can not open command file %s. exit.', self.cmdFile)
                 exit(2)
-        for line in fCmd:
+
+        for line in self.fCmd:
             if line[:8] == '#NETTYPE':
-                aType = line.split(' ')
+                aType = line.split()
                 self.netType = aType[1]
         if self.netType is None:
             logging.fatal('no find net type,exit.')
             exit(3)
         facName = '%sFac' % self.netType
         fac_meta = getattr(self.appNameBody, facName)
-        fac = fac_meta(self, self.fCmd, self.caseDs)
+        fac = fac_meta(self, self.netType, self.fCmd, self.caseDs)
         return fac
 
     def start(self):
@@ -974,7 +1159,7 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        factory = self.makeFactory(self.cfg, self.cmdFile, self.caseDs)
+        factory = self.makeFactory()
         director = Director(factory)
         director.start()
 
