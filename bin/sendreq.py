@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""sendcentrex.py"""
+"""sendreq.py"""
 ######################################################################
 ## Filename:      sendreq.py
 ##
@@ -22,16 +22,6 @@ import re
 import signal
 import logging
 from socket import *
-
-
-class HssUser(object):
-    def __init__(self, msisdn, imsi, client):
-        self.msisdn = msisdn
-        self.imsi = imsi
-        self.client = client
-        self.isHssUser = 0
-    def qryHss(self):
-        pass
 
 
 class Conf(object):
@@ -455,17 +445,16 @@ class CentrexClient(object):
         pass
 
 
-
-class NetFac(object):
-    def _init__(self, main, netType, cmdFile, orderDs):
-        self.netType = netType
+class FileFac(object):
+    def _init__(self, main):
         self.main = main
-        self.cmdFile = cmdFile
-        self.orderDsName = orderDs
+        self.netType = main.netType
+        self.orderDsName = main.caseDs
         self.orderDs = None
         self.aNetInfo = []
         self.dNetClient = {}
-        self.respName = '%s.rsp' % self.orderDsName
+        self.respName = '%s.rsp' % os.path.basename(self.orderDsName)
+        self.respFullName = os.path.join(self.main.dirOutput, self.respName)
         self.resp = None
 
     def openDs(self):
@@ -482,7 +471,7 @@ class NetFac(object):
 
     def openRsp(self):
         if self.resp: return self.resp
-        self.resp = self.main.openFile(self.respName, 'w')
+        self.resp = self.main.openFile(self.respFullName, 'a')
         if self.orderDs is None:
             logging.fatal('Can not open response file %s.', self.respName)
             exit(2)
@@ -500,7 +489,8 @@ class NetFac(object):
             if line[0] == '#':
                 continue
             aParams = line.split()
-            order = ReqOrder()
+            orderClassName = '%sOrder' % self.netType
+            order = self.main.createInstance(self.main.appNameBody, orderClassName)
             order.setParaName(self.aFildName)
             order.setPara(aParams)
             order.net = self.dNetClient[0]
@@ -510,9 +500,10 @@ class NetFac(object):
     def makeNet(self):
         cfg = self.main.cfg
         aNetInfo = cfg.dNet[self.netType]
+        netClassName = '%sClient' % self.netType
         logging.info('load %d net info.', len(aNetInfo))
         for netInfo in self.aNetInfo:
-            net = NetClient(netInfo, self.main.fCmd)
+            net = self.main.createInstance(self.main.appNameBody, netClassName, netInfo, self.main.fCmd)
             net.loadCmd()
             net.tmplReplaceNetInfo()
             net.makeHttpHead()
@@ -520,7 +511,7 @@ class NetFac(object):
         return self.dNetClient
 
 
-class NetClient(object):
+class HttpShortClient(object):
     def __init__(self, netInfo, cmdfile):
         self.dNetInfo = netInfo
         self.fCmd = cmdfile
@@ -616,8 +607,8 @@ class NetClient(object):
             self.recvResp(order)
 
     def connectServer(self):
-        # if self.remoteServer: self.remoteServer.close()
-        if self.remoteServer: return self.remoteServer
+        if self.remoteServer: self.remoteServer.close()
+        # if self.remoteServer: return self.remoteServer
         self.remoteServer = TcpClt(self.dNetInfo['Ip'], int(self.dNetInfo['Port']))
         return self.remoteServer
 
@@ -645,7 +636,6 @@ class NetClient(object):
         return True
 
 
-
 class ReqOrder(object):
     def __init__(self):
         self.no = None
@@ -670,14 +660,12 @@ class ReqOrder(object):
         return status
 
 
-class TelOrder(ReqOrder):
-    def __init__(self):
-        super(self.__class__, self).__init__()
-        self.dParam['BILL_ID'] = None
-        self.dParam['USERLOCKFLG'] = 0
-        self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = None
-        self.dParam['POSTCODE'] = '10'
-        self.dParam['ServiceType'] = 0
+class HttpShortOrder(ReqOrder):
+    pass
+
+class CentrexFac(NetFac):
+    def __init__(self, main, netType, orderDs):
+        super(self.__class__, self).__init__(main, netType, orderDs)
 
 
 class CentrexFac(object):
@@ -1129,6 +1117,12 @@ class Main(object):
             return None
         return f
 
+    def createInstance(module_name, class_name, *args, **kwargs):
+        # module_meta = __import__(module_name, globals(), locals(), [class_name])
+        class_meta = getattr(module_name, class_name)
+        obj = class_meta(*args, **kwargs)
+        return obj
+
     def makeFactory(self):
         if not self.fCmd:
             self.fCmd = self.openFile(self.cmdFile, 'r')
@@ -1143,9 +1137,10 @@ class Main(object):
         if self.netType is None:
             logging.fatal('no find net type,exit.')
             exit(3)
-        facName = '%sFac' % self.netType
-        fac_meta = getattr(self.appNameBody, facName)
-        fac = fac_meta(self, self.netType, self.fCmd, self.caseDs)
+        # facName = '%sFac' % self.netType
+        # fac_meta = getattr(self.appNameBody, facName)
+        # fac = fac_meta(self)
+        fac = FileFac()
         return fac
 
     def start(self):
