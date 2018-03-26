@@ -156,21 +156,66 @@ class Conf(object):
 
 
 class RemoteHost(object):
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, hostname=None):
         self.ip = ip
         self.port = port
+        self.hostName = hostname
         self.addr = (ip, port)
-        self.connected = None
+        self.status = None
 
     def connect(self):
-        self.connected = 'success'
+        self.status = 'connected'
         clt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             clt.connect(self.addr)
         except Exception, e:
             print('host %s:%d fail: %s' % (self.ip, self.port, e))
-            self.connected = 'fail: %s' % e
+            self.status = 'fail: %s' % e
+        clt.close()
         return self.connected
+
+    def getStatus(self):
+        msg = '%s:%d %s' % (self.ip, self.port, self.status)
+        return msg
+
+
+class NetLinker(object):
+    def __init__(self, main, netFile):
+        self.main = main
+        self.netFile = netFile
+        self.aHost = []
+        self.aHostStatus = []
+        self.fResult = None
+
+    def linkRemoteHost(self):
+        fNet = self.main.openFile(self.netFile, 'r')
+        for line in fNet:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            aHostInfo = line.split()
+            if len(aHostInfo) > 3:
+                hPre = aHostInfo[:2]
+                hPre.append(' '.join(aHostInfo[2:]))
+                aHostInfo = hPre
+            reHost = RemoteHost(*aHostInfo)
+            self.aHost.append(reHost)
+            reHost.connect()
+            self.aHostStatus.append(reHost.getStatus())
+            self.writeStatus(reHost)
+        fNet.close()
+        self.fResult.close()
+
+    def getLinkStatus(self):
+        return self.aHostStatus
+
+    def writeStatus(self, reHost):
+        if not self.fResult or self.fResult.closed:
+            self.fResult = self.main.openFile(self.main.outFile)
+        self.fResult.write('%s%s' % (reHost.getStatus, os.linesep))
+
 
 class Main(object):
     def __init__(self):
@@ -285,10 +330,11 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
+        print('respfile: %s' % self.outFile)
 
         self.cfg.loadNet()
         factory = self.makeFactory()
-        print('respfile: %s' % factory.respFullName)
+
         director = Director(factory)
         director.start()
 
