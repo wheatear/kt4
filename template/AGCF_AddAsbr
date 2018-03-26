@@ -1,0 +1,29 @@
+#NETTYPE = HttpShort
+#NETCODE = AGCF
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://www.chinamobile.com/IMS/XGCF/">
+  <SOAP-ENV:Header>
+    <m:Authentication>
+      <m:Username>^<GLOBAL.USER^></m:Username>
+      <m:Password>^<GLOBAL.PASSWD^></m:Password>
+    </m:Authentication>
+    <m:MessageID>1</m:MessageID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <m:AddAsbr_AGCF>
+      <m:PUI>sip:+86^<BILL_ID^>@ims.bj.chinamobile.com</m:PUI>
+      <m:PRI>+86^<BILL_ID^>@ims.bj.chinamobile.com</m:PRI>
+      <m:REGTP>0</m:REGTP>
+      <m:DID>11</m:DID>
+      <m:MN>1000</m:MN>
+      <m:TRUNKGP>100</m:TRUNKGP>
+      <m:PLF>0</m:PLF>
+      <m:HNID>AGCF</m:HNID>
+      <m:NETID>AGCF</m:NETID>
+      <m:NETINFO>AGCF</m:NETINFO>
+      <m:PHNCON>AGCF</m:PHNCON>
+      <m:DP>0</m:DP>
+      <m:PWD>Huawei@123</m:PWD>
+      <m:MGN>AGCF</m:MGN>
+    </m:AddAsbr_AGCF>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

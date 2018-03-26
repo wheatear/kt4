@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+# -*- coding: utf-8 -*-
 """sendreq.py"""
 ######################################################################
 ## Filename:      sendreq.py
@@ -48,7 +48,7 @@ class Conf(object):
         return self.logLevel
 
     def openCfg(self):
-        if self.fCfg: return self.fCfg
+        if self.fCfg and not self.fCfg.closed: return self.fCfg
         try:
             self.fCfg = open(self.cfgFile, 'r')
         except IOError, e:
@@ -69,17 +69,17 @@ class Conf(object):
             if len(line) == 0:
                 if net is not None:
                     netType = net['NETTYPE']
-                    if len(self.dNet[netType]) == 0:
+                    if netType not in self.dNet:
                         self.dNet[netType] = [net]
                     else:
                         self.dNet[netType].append(net)
                 net = None
                 netSection = 0
                 continue
-            if line[:7] == '#NETTYPE':
+            if line[:8] == '#NETTYPE':
                 if net is not None:
                     netType = net['NETTYPE']
-                    if len(self.dNet[netType]) == 0:
+                    if netType not in self.dNet:
                         self.dNet[netType] = [net]
                     else:
                         self.dNet[netType].append(net)
@@ -92,7 +92,10 @@ class Conf(object):
                 continue
             logging.debug(line)
             param = line.split(' = ', 1)
-            net[param[0]] = param[1]
+            if len(param) > 1:
+                net[param[0]] = param[1]
+            else:
+                net[param[0]] = None
 
         self.closeCfg()
         logging.info('load %d net.', len(self.dNet))
@@ -446,16 +449,18 @@ class CentrexClient(object):
 
 
 class FileFac(object):
-    def _init__(self, main):
+    def __init__(self, main):
         self.main = main
         self.netType = main.netType
-        self.orderDsName = main.caseDs
+        self.netCode = main.netCode
+        self.orderDsName = main.dsIn
         self.orderDs = None
         self.aNetInfo = []
         self.dNetClient = {}
-        self.respName = '%s.rsp' % os.path.basename(self.orderDsName)
+        self.respName = '%s.rsp' % os.path.basename(self.main.outFile)
         self.respFullName = os.path.join(self.main.dirOutput, self.respName)
         self.resp = None
+        self.aCmdTemplates = []
 
     def openDs(self):
         if self.orderDs: return self.orderDs
@@ -472,6 +477,7 @@ class FileFac(object):
     def openRsp(self):
         if self.resp: return self.resp
         self.resp = self.main.openFile(self.respFullName, 'a')
+        logging.info('open response file: %s', self.respName)
         if self.orderDs is None:
             logging.fatal('Can not open response file %s.', self.respName)
             exit(2)
@@ -479,6 +485,7 @@ class FileFac(object):
 
     def makeOrderFildName(self):
         fildName = self.orderDs.readline()
+        fildName = fildName.upper()
         self.aFildName = fildName.split()
 
     def makeOrder(self):
@@ -490,42 +497,18 @@ class FileFac(object):
                 continue
             aParams = line.split()
             orderClassName = '%sOrder' % self.netType
-            order = self.main.createInstance(self.main.appNameBody, orderClassName)
+            order = createInstance(self.main.appNameBody, orderClassName)
             order.setParaName(self.aFildName)
             order.setPara(aParams)
-            order.net = self.dNetClient[0]
+            # netCode = self.aNetInfo[0]['NetCode']
+            order.net = self.dNetClient[self.netCode]
             return order
         return None
-
-    def makeNet(self):
-        cfg = self.main.cfg
-        aNetInfo = cfg.dNet[self.netType]
-        netClassName = '%sClient' % self.netType
-        logging.info('load %d net info.', len(aNetInfo))
-        for netInfo in self.aNetInfo:
-            net = self.main.createInstance(self.main.appNameBody, netClassName, netInfo, self.main.fCmd)
-            net.loadCmd()
-            net.tmplReplaceNetInfo()
-            net.makeHttpHead()
-            self.dNetClient[netInfo['NetCode']] = net
-        return self.dNetClient
-
-
-class HttpShortClient(object):
-    def __init__(self, netInfo, cmdfile):
-        self.dNetInfo = netInfo
-        self.fCmd = cmdfile
-        self.httpHead = None
-        self.httpRequest = None
-        self.aCmdTemplates = []
-        self.httpHead = None
-        self.httpBody = None
-        self.remoteServer = None
 
     def loadCmd(self):
         tmpl = None
         tmplMsg = ''
-        for line in self.fCmd:
+        for line in self.main.fCmd:
             line = line.strip()
             if len(line) == 0:
                 if len(tmplMsg) > 0:
@@ -544,7 +527,37 @@ class HttpShortClient(object):
             self.aCmdTemplates.append(tmpl)
 
         logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
-        self.fCmd.close()
+        self.main.fCmd.close()
+
+    def makeNet(self):
+        cfg = self.main.cfg
+        if self.netType not in cfg.dNet:
+            logging.fatal('no find net type %s', self.netType)
+            exit(2)
+        self.aNetInfo = cfg.dNet[self.netType]
+        netClassName = '%sClient' % self.netType
+        logging.info('load %d net info.', len(self.aNetInfo))
+        for netInfo in self.aNetInfo:
+            # print netInfo
+            net = createInstance(self.main.appNameBody, netClassName, netInfo)
+            net.aCmdTemplates= self.aCmdTemplates
+            net.tmplReplaceNetInfo()
+            net.makeHttpHead()
+            netCode = netInfo['NetCode']
+            self.dNetClient[netCode] = net
+        return self.dNetClient
+
+
+class HttpShortClient(object):
+    def __init__(self, netInfo):
+        self.dNetInfo = netInfo
+        # self.fCmd = cmdfile
+        self.httpHead = None
+        self.httpRequest = None
+        self.aCmdTemplates = []
+        self.httpHead = None
+        self.httpBody = None
+        self.remoteServer = None
 
     # def makeCmdTempate(self):
     #     for tmpl in self.aCmdTemplates:
@@ -564,7 +577,7 @@ class HttpShortClient(object):
         for var in self.dNetInfo:
             varPlace = '^<%s^>' % var
             if varPlace in self.httpHead:
-                httpHead = httpHead.replace(varPlace, self.dNetInfo[var])
+                httpHead = self.httpHead.replace(varPlace, self.dNetInfo[var])
                 self.httpHead = httpHead
 
     def makeHttpHead(self):
@@ -603,6 +616,7 @@ class HttpShortClient(object):
         self.makeHttpMsg(order)
         # logging.debug(order.httpRequest)
         for req in order.aReqMsg:
+            logging.debug('send:%s', req)
             self.remoteServer.send(req)
             self.recvResp(order)
 
@@ -618,7 +632,7 @@ class HttpShortClient(object):
         logging.debug(rspMsg)
         logging.info('parse orders response...')
         resp = {}
-        resp['response'] = 'rspMsg'
+        resp['response'] = rspMsg.replace('\r\n','\\r\\n')
         resp['status'] = 'UNKNOWN'
         if 'RSP_SUCCESS' not in self.dNetInfo:
             order.aResp.append(resp)
@@ -663,7 +677,7 @@ class ReqOrder(object):
 class HttpShortOrder(ReqOrder):
     pass
 
-class CentrexFac(NetFac):
+class CentrexFac(FileFac):
     def __init__(self, main, netType, orderDs):
         super(self.__class__, self).__init__(main, netType, orderDs)
 
@@ -1028,9 +1042,10 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
+        self.factory.loadCmd()
         self.factory.makeNet()
         self.factory.openDs()
-        self.factory.makeOrderHead()
+        self.factory.makeOrderFildName()
         self.fRsp = self.factory.openRsp()
         # client.loadClient()
         # client.loadCmd()
@@ -1038,10 +1053,11 @@ class Director(object):
         while not self.shutDown:
             logging.debug('timeer %f load order', time.time())
             order = self.factory.makeOrder()
-            client = order.net
+
             if order is None:
                 logging.info('load all orders,')
                 break
+            client = order.net
             i += 1
             client.connectServer()
             client.sendOrder(order)
@@ -1056,28 +1072,37 @@ class Director(object):
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
-        self.cmdFile = None
+        self.argc = len(sys.argv)
+        self.fCmd = None
         self.caseDs = None
         self.netType = None
+        self.netCode = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
+        self.dirBin = dirBin
+        self.appName = appName
         # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
         appNameBody, appNameExt = os.path.splitext(appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
 
-        if dirBin=='' or dirBin=='.':
+        self.dirApp = None
+        if dirBin == '' or dirBin == '.':
             dirBin = '.'
             dirApp = '..'
             self.dirBin = dirBin
             self.dirApp = dirApp
         else:
             dirApp, dirBinName = os.path.split(dirBin)
-            if dirApp=='':
+            # print('dirapp: %s' % dirApp)
+            if dirApp == '':
                 dirApp = '.'
                 self.dirBin = dirBin
                 self.dirApp = dirApp
+            else:
+                self.dirApp = dirApp
+        # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
         self.dirLog = os.path.join(self.dirApp, 'log')
         self.dirCfg = os.path.join(self.dirApp, 'config')
         self.dirTpl = os.path.join(self.dirApp, 'template')
@@ -1090,23 +1115,28 @@ class Main(object):
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.appNameBody, self.today)
         logNamePre = '%s_%s' % (self.appNameBody, self.today)
+        outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
+        self.outFile = os.path.join(self.dirOutput, outFileName)
+        logging.info('outfile: %s', self.outFile)
 
     def checkArgv(self):
+        dirBin, appName = os.path.split(self.Name)
+        self.appName = appName
         if self.argc < 3:
             self.usage()
         # self.checkopt()
         argvs = sys.argv[1:]
         self.cmdFile = sys.argv[1]
-        self.inDs = sys.argv[2]
-        self.logFile = '%s%s' % (self.caseDs, '.log')
-        self.resultOut = '%s%s' % (self.caseDs, '.rsp')
+        self.dsIn = sys.argv[2]
+        # self.logFile = '%s%s' % (self.dsIn, '.log')
+        # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
     def usage(self):
-        print "Usage: %s cmdfile datafile" % self.baseName
-        print "example:   %s %s" % (self.baseName,'creatUser teldata')
+        print "Usage: %s cmdfile datafile" % self.appName
+        print "example:   %s %s" % (self.appName,'creatUser teldata')
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -1117,15 +1147,10 @@ class Main(object):
             return None
         return f
 
-    def createInstance(module_name, class_name, *args, **kwargs):
-        # module_meta = __import__(module_name, globals(), locals(), [class_name])
-        class_meta = getattr(module_name, class_name)
-        obj = class_meta(*args, **kwargs)
-        return obj
-
     def makeFactory(self):
         if not self.fCmd:
             self.fCmd = self.openFile(self.cmdFile, 'r')
+            logging.info('cmd file: %s', self.cmdFile)
             if not self.fCmd:
                 logging.fatal('can not open command file %s. exit.', self.cmdFile)
                 exit(2)
@@ -1133,35 +1158,56 @@ class Main(object):
         for line in self.fCmd:
             if line[:8] == '#NETTYPE':
                 aType = line.split()
-                self.netType = aType[1]
+                self.netType = aType[2]
+            if line[:8] == '#NETCODE':
+                aCode = line.split()
+                self.netCode = aCode[2]
+            if self.netType and self.netCode:
+                logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+                break
+        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
         if self.netType is None:
             logging.fatal('no find net type,exit.')
             exit(3)
         # facName = '%sFac' % self.netType
         # fac_meta = getattr(self.appNameBody, facName)
         # fac = fac_meta(self)
-        fac = FileFac()
+        fac = FileFac(self)
         return fac
 
+    def createInstance(module_name, class_name, *args, **kwargs):
+        module_meta = __import__(module_name, globals(), locals(), [class_name])
+        class_meta = getattr(module_meta, class_name)
+        obj = class_meta(*args, **kwargs)
+        return obj
+
     def start(self):
-        self.parseWorkEnv()
         self.checkArgv()
+        self.parseWorkEnv()
 
         self.cfg = Conf(self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
-
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
-        logging.info('%s starting...' % self.baseName)
+        logging.info('%s starting...' % self.appName)
+        print('logfile: %s' % self.logFile)
 
+        self.cfg.loadNet()
         factory = self.makeFactory()
+        print('respfile: %s' % factory.respFullName)
         director = Director(factory)
         director.start()
 
+
+def createInstance(module_name, class_name, *args, **kwargs):
+    module_meta = __import__(module_name, globals(), locals(), [class_name])
+    class_meta = getattr(module_meta, class_name)
+    obj = class_meta(*args, **kwargs)
+    return obj
 
 # main here
 if __name__ == '__main__':
     main = Main()
     # main.checkArgv()
     main.start()
-    logging.info('%s complete.', main.baseName)
+    logging.info('%s complete.', main.appName)
