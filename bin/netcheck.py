@@ -23,6 +23,7 @@ import re
 import signal
 import logging
 import socket
+import multiprocessing
 
 
 class RemoteHost(object):
@@ -44,7 +45,7 @@ class RemoteHost(object):
             self.status = 'fail: %s' % e
         clt.close()
         logging.info('host %s:%d  %s', self.ip, self.port, self.status)
-        return self.status
+        return self.getStatus()
 
     def getStatus(self):
         msg = '%s:%d %s %s' % (self.ip, self.port, self.hostName, self.status)
@@ -52,16 +53,18 @@ class RemoteHost(object):
 
 
 class NetChecker(object):
-    def __init__(self, main, netFile):
+    def __init__(self, main, netFile, processes):
         self.main = main
         self.netFile = netFile
+        self.processes = processes
         self.aHost = []
+        self.aHostStatus = []
         self.aCheckStatus = []
         self.fResult = None
         self.hostName = socket.gethostname()
         self.hostIp = socket.gethostbyname(self.hostName)
 
-    def checkRemoteHost(self):
+    def getAllHost(self):
         fNet = self.main.openFile(self.netFile, 'r')
         for line in fNet:
             line = line.strip()
@@ -76,21 +79,34 @@ class NetChecker(object):
                 aHostInfo = hPre
             reHost = RemoteHost(*aHostInfo)
             self.aHost.append(reHost)
-            reHost.connect()
-            hostStatus = reHost.getStatus()
-            checkStatus = '%s - %s' % (self.hostIp, hostStatus)
-            self.aCheckStatus.append(checkStatus)
-            self.writeStatus(checkStatus)
         fNet.close()
-        self.fResult.close()
+
+    def checkAllHost(self):
+        self.getAllHost()
+        pool = multiprocessing.Pool(self.processes)
+        self.aHostStatus = pool.map(self.checkRemoteHost, self.aHost)
+        pool.close()
+        pool.join()
+        self.getCheckStatus()
+        self.writeStatus()
+
+    def checkRemoteHost(self, reHost):
+        reHost.connect()
 
     def getCheckStatus(self):
+        if len(self.aCheckStatus) > 0:
+            return self.aCheckStatus
+        for status in self.aHostStatus:
+            checkStatus = '%s - %s' % (self.hostIp, status)
+            self.aCheckStatus.append(checkStatus)
         return self.aCheckStatus
 
     def writeStatus(self, status):
         if not self.fResult or self.fResult.closed:
             self.fResult = self.main.openFile(self.main.outFile, 'w')
-        self.fResult.write('%s%s' % (status, os.linesep))
+        for status in self.aCheckStatus:
+            self.fResult.write('%s%s' % (status, os.linesep))
+        self.fResult.close()
 
 
 class Main(object):
@@ -183,8 +199,8 @@ class Main(object):
         print('respfile: %s' % self.outFile)
         logging.info('outfile: %s', self.outFile)
 
-        checker = NetChecker(self, self.dsIn)
-        checker.checkRemoteHost()
+        checker = NetChecker(self, self.dsIn, 10)
+        checker.checkAllHost()
 
 
 
