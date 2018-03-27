@@ -22,12 +22,55 @@ import re
 import signal
 import logging
 import socket
+import sqlite3
+
+
+class ReHost(object):
+    def __init__(self, hostName, hostIp):
+        self.hostName = hostName
+        self.hostIp = hostIp
+        self.dUser = {}
+
+    def setUser(self, user, passwd, prompt):
+        self.dUser[user] = (passwd, prompt)
+
+
+class DisCmd(object):
+    def __init__(self, host, user, file, remoteDir=None):
+        self.host = host
+        self.user = user
+        self.file = file
+        self.remoteDir = remoteDir
 
 
 class Distribute(object):
     def __init__(self, main):
         self.main = main
-        self.aHost = []
+        # self.aHost = []
+        self.dHosts = {}
+
+    def makeAllHosts(self):
+        conn = sqlite3.connect('kthosts.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT hostname,hostip FROM kthosts')
+        rows = cursor.fetchall()
+        dHosts = {}
+        for row in rows:
+            host = ReHost(*row)
+            self.dHosts[row[0]] = host
+        # cursor.close()
+        userSql = 'select hostname,user,passwd,prompt from hostuser'
+        cursor.execute(userSql)
+        rows = cursor.fetchall()
+        for row in rows:
+            hostName = row[0]
+            user = row[1]
+            passwd = row[2]
+            prompt = row[3]
+            self.dHosts[hostName].setUser(user, passwd, prompt)
+        cursor.close()
+        conn.close()
+        return self.dHosts
 
     def spreadFile(self,remotedir,files):
         sucfile = []
@@ -145,24 +188,18 @@ class Main(object):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
         self.appName = appName
-        # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
         appNameBody, appNameExt = os.path.splitext(appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
 
-        self.dirApp = None
-        if dirBin == '' or dirBin == '.':
-            dirBin = '.'
-            dirApp = '..'
-            self.dirBin = dirBin
-            self.dirApp = dirApp
+        self.dirApp = os.path.dirname(self.dirBin)
+        if self.dirBin == '' or self.dirBin == '.':
+            self.dirBin = '.'
+            self.dirApp = '..'
         else:
-            dirApp, dirBinName = os.path.split(dirBin)
-            # print('dirapp: %s' % dirApp)
+            dirApp = os.path.dirname(self.dirBin)
             if dirApp == '':
-                dirApp = '.'
-                self.dirBin = dirBin
-                self.dirApp = dirApp
+                self.dirApp = '.'
             else:
                 self.dirApp = dirApp
         # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
@@ -185,15 +222,15 @@ class Main(object):
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
-        logging.info('outfile: %s', self.outFile)
+
 
     def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
+        appName = os.path.basename(self.Name)
         self.appName = appName
         if self.argc < 2:
             self.usage()
-        self.dsFile = sys.argv[1]
-        if self.argc == 3:
+        self.souFile = sys.argv[1]
+        if self.argc > 2:
             self.remoteDir = sys.argc[2]
 
     def usage(self):
@@ -251,6 +288,7 @@ class Main(object):
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
         print('outfile: %s' % self.outFile)
+        logging.info('outfile: %s', self.outFile)
 
         self.cfg.loadNet()
         factory = self.makeFactory()
