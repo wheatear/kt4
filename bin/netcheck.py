@@ -61,8 +61,8 @@ class NetChecker(object):
         self.aHostStatus = []
         self.aCheckStatus = []
         self.fResult = None
-        self.hostName = socket.gethostname()
-        self.hostIp = socket.gethostbyname(self.hostName)
+        self.hostName = None
+        self.hostIp = None
 
     def getAllHost(self):
         fNet = self.main.openFile(self.netFile, 'r')
@@ -81,17 +81,32 @@ class NetChecker(object):
             self.aHost.append(reHost)
         fNet.close()
 
+    def getHostIp(self):
+        self.hostName = socket.gethostname()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            self.hostIp = ip
+        finally:
+            s.close()
+        return ip
+
     def checkAllHost(self):
+        self.getHostIp()
         self.getAllHost()
-        pool = multiprocessing.Pool(self.processes)
-        self.aHostStatus = pool.map(self.checkRemoteHost, self.aHost)
-        pool.close()
-        pool.join()
+        # pool = multiprocessing.Pool(self.processes)
+        # self.aHostStatus = pool.map(self.checkRemoteHost, self.aHost)
+        # pool.close()
+        # pool.join()
+        for host in self.aHost:
+            status = self.checkRemoteHost(host)
+            self.aHostStatus.append(status)
         self.getCheckStatus()
         self.writeStatus()
 
     def checkRemoteHost(self, reHost):
-        reHost.connect()
+        return reHost.connect()
 
     def getCheckStatus(self):
         if len(self.aCheckStatus) > 0:
@@ -101,7 +116,7 @@ class NetChecker(object):
             self.aCheckStatus.append(checkStatus)
         return self.aCheckStatus
 
-    def writeStatus(self, status):
+    def writeStatus(self):
         if not self.fResult or self.fResult.closed:
             self.fResult = self.main.openFile(self.main.outFile, 'w')
         for status in self.aCheckStatus:
@@ -180,6 +195,8 @@ class Main(object):
             logging.fatal('open file %s error: %s', fileName, e)
             return None
         return f
+
+
 
     def start(self):
         self.checkArgv()

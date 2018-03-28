@@ -227,15 +227,16 @@ class Main(object):
     def checkArgv(self):
         appName = os.path.basename(self.Name)
         self.appName = appName
-        if self.argc < 2:
+        if self.argc < 3:
             self.usage()
         self.souFile = sys.argv[1]
+        self.user = sys.argv[2]
         if self.argc > 2:
-            self.remoteDir = sys.argc[2]
+            self.remoteDir = sys.argc[3]
 
     def usage(self):
-        print "Usage: %s somefiles remotedir" % self.appName
-        print "example:   %s %s %s" % (self.appName,'somefiles', 'remotedir')
+        print "Usage: %s somefiles user remotedir" % self.appName
+        print "example:   %s %s %s" % (self.appName,'somefiles ktrun', 'remotedir')
         exit(1)
 
     def openFile(self, fileName, mode):
