@@ -64,7 +64,6 @@ class Distribute(object):
         cursor = conn.cursor()
         cursor.execute('SELECT hostname,hostip FROM kthosts')
         rows = cursor.fetchall()
-        dHosts = {}
         for row in rows:
             host = ReHost(*row)
             self.dHosts[row[0]] = host
@@ -125,7 +124,6 @@ class Distribute(object):
                 pscp.sendline(cmdPwd)
             elif index == 1:
                 return self.parseResp(pscp)
-            # pscp.sendline('Tst,1234')
             fileBase = os.path.basename(self.file)
             index = pscp.expect(['assword:', pexpect.EOF])
             i = 0
@@ -134,15 +132,8 @@ class Distribute(object):
                 return False
             elif index == 1:
                 return self.parseResp(pscp)
-
-            # elif index == 1:
-            #     logging.info('put file %s to %s error:%s',lfile,rhost,pscp.match.group())
-            #     return False
-            # elif index == 2:
-            #     logging.info('put file %s to %s error:%s',lfile,rhost,pscp.match.group())
-            #     return False
         except (pexpect.TIMEOUT,pexpect.EOF),e:
-            logging.info(pscp.buffer)
+            logging.error(pscp.buffer)
             logging.info('scp file %s:%s failed. %s' ,host.hostIp,self.file,e)
             return False
         return True
@@ -227,7 +218,6 @@ class Main(object):
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
 
-
     def checkArgv(self):
         appName = os.path.basename(self.Name)
         self.appName = appName
@@ -237,6 +227,8 @@ class Main(object):
         self.user = sys.argv[2]
         if self.argc > 2:
             self.remoteDir = sys.argv[3]
+        else:
+            self.remoteDir = self.souFile
 
     def usage(self):
         print "Usage: %s somefiles user remotedir" % self.appName
