@@ -22,7 +22,9 @@ import re
 import signal
 import logging
 import socket
+import multiprocessing
 import sqlite3
+import pexpect
 
 
 class ReHost(object):
@@ -46,8 +48,16 @@ class DisCmd(object):
 class Distribute(object):
     def __init__(self, main):
         self.main = main
+        self.file = main.souFile
+        self.user = main.user
+        self.remoteDir = main.remoteDir
+        self.outFile = main.outFile
         # self.aHost = []
         self.dHosts = {}
+        self.aHostStatus = []
+        self.aDistStatus = []
+        self.succ = []
+        self.fail = []
 
     def makeAllHosts(self):
         conn = sqlite3.connect('kthosts.db')
@@ -72,29 +82,38 @@ class Distribute(object):
         conn.close()
         return self.dHosts
 
-    def spreadFile(self,remotedir,files):
-        sucfile = []
-        failfile = []
-        # logging.info('put file %s to %s', files ,self.aHost)
-        for h in self.aHost:
-            if h[0] == self.localIp:
-                continue
-            logging.info('put to host: %s',h)
-            logging.info('put files: %s', files)
-            putfile = self.putFile(files, h[2], h[3], h[0], remotedir)
-            if putfile:
-                sucfile.append((h[0], files))
-                logging.debug('success spread to %s file: %s', h[0], files)
+    def spreadFile(self):
+        self.makeAllHosts()
+        # pool = multiprocessing.Pool(self.processes)
+        # self.aHostStatus = pool.map(self.checkRemoteHost, self.aHost)
+        # pool.close()
+        # pool.join()
+        for hostName in self.dHosts:
+            host = self.dHosts[hostName]
+            status = self.scpFile(host)
+            result = None
+            if status:
+                result = '%s %s succ' % (hostName, self.file)
+                self.succ.append(result)
             else:
-                failfile.append((h[0], files))
-                logging.debug('fail spread to %s file: %s', h[0], files)
-        logging.info('success spread %d files: %s', len(sucfile), sucfile)
-        logging.info('fail spread %d files: %s', len(failfile), failfile)
+                result = '%s %s fail' % (hostName, self.file)
+                self.fail.append(result)
+            self.aHostStatus.append(result)
+        # self.getCheckStatus()
+        self.writeStatus()
 
-    def putFile(self,lfile,ruser,rpasswd,rhost,rpath):
-        cmdUser = 'nms'
-        cmdPwd = 'ailk,123'
-        cmd = 'scp -pr %s %s@%s:%s' % (lfile,cmdUser,rhost,rpath)
+    def writeStatus(self):
+        if not self.fResult or self.fResult.closed:
+            self.fResult = self.main.openFile(self.main.outFile, 'w')
+        for status in self.aHostStatus:
+            self.fResult.write('%s%s' % (status, os.linesep))
+        self.fResult.close()
+
+    def scpFile(self, host):
+        # lfile, ruser, rpasswd, rhost, rpath
+        cmdUser = self.user
+        cmdPwd = host.dUser[cmdUser][0]
+        cmd = 'scp -pr %s %s@%s:%s' % (self.file,cmdUser,host.hostIp,self.remoteDir)
         logging.info( cmd)
         try:
             pscp = pexpect.spawn(cmd)
@@ -107,11 +126,11 @@ class Distribute(object):
             elif index == 1:
                 return self.parseResp(pscp)
             # pscp.sendline('Tst,1234')
-            fileBase = os.path.basename(lfile)
+            fileBase = os.path.basename(self.file)
             index = pscp.expect(['assword:', pexpect.EOF])
             i = 0
             if index == 0:
-                logging.warn('passward error for hotst: %s',rhost)
+                logging.warn('passward error for hotst: %s',host.hostIp)
                 return False
             elif index == 1:
                 return self.parseResp(pscp)
@@ -124,7 +143,7 @@ class Distribute(object):
             #     return False
         except (pexpect.TIMEOUT,pexpect.EOF),e:
             logging.info(pscp.buffer)
-            logging.info('scp file %s:%s failed. %s' ,rhost,lfile,e)
+            logging.info('scp file %s:%s failed. %s' ,host.hostIp,self.file,e)
             return False
         return True
 
@@ -154,22 +173,6 @@ class Distribute(object):
         # logging.info(pscp.match.group())
         return True
 
-    def getAllHost(self):
-        try:
-            fCfg = open(self.cfgfile,'r')
-        except Exception,e:
-            logging.error('can not open host cfg file %s: %s' ,self.cfgfile,e)
-            exit(-1)
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            aHostInfo = line.split(' ')
-            self.aHost.append(aHostInfo)
-        fCfg.close()
-
     def getLocalIp(self):
         self.hostname = socket.gethostname()
         logging.info('local host: %s' ,self.hostname)
@@ -181,7 +184,8 @@ class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
-        self.dsFile = None
+        self.souFile = None
+        self.user = None
         self.remoteDir = None
 
     def parseWorkEnv(self):
@@ -232,7 +236,7 @@ class Main(object):
         self.souFile = sys.argv[1]
         self.user = sys.argv[2]
         if self.argc > 2:
-            self.remoteDir = sys.argc[3]
+            self.remoteDir = sys.argv[3]
 
     def usage(self):
         print "Usage: %s somefiles user remotedir" % self.appName
@@ -247,42 +251,15 @@ class Main(object):
             return None
         return f
 
-    def makeFactory(self):
-        if not self.fCmd:
-            self.fCmd = self.openFile(self.cmdFile, 'r')
-            logging.info('cmd file: %s', self.cmdFile)
-            if not self.fCmd:
-                logging.fatal('can not open command file %s. exit.', self.cmdFile)
-                exit(2)
-
-        for line in self.fCmd:
-            if line[:8] == '#NETTYPE':
-                aType = line.split()
-                self.netType = aType[2]
-            if line[:8] == '#NETCODE':
-                aCode = line.split()
-                self.netCode = aCode[2]
-            if self.netType and self.netCode:
-                logging.info('net type: %s  net code: %s', self.netType, self.netCode)
-                break
-        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
-        if self.netType is None:
-            logging.fatal('no find net type,exit.')
-            exit(3)
-        # facName = '%sFac' % self.netType
-        # fac_meta = getattr(self.appNameBody, facName)
-        # fac = fac_meta(self)
-        fac = FileFac(self)
-        return fac
-
     def start(self):
         self.checkArgv()
         self.parseWorkEnv()
 
         # self.cfg = Conf(self.cfgFile)
         # self.logLevel = self.cfg.loadLogLevel()
-        logLevel = 'logging.%s' % 'DEBUG'
-        self.logLevel = eval(logLevel)
+        # logLevel = 'logging.%s' % 'DEBUG'
+        # self.logLevel = eval(logLevel)
+        self.logLevel = logging.DEBUG
 
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
@@ -291,11 +268,8 @@ class Main(object):
         print('outfile: %s' % self.outFile)
         logging.info('outfile: %s', self.outFile)
 
-        self.cfg.loadNet()
-        factory = self.makeFactory()
-
-        director = Director(factory)
-        director.start()
+        distributer = Distribute(main)
+        distributer.spreadFile()
 
 
 if __name__ == '__main__':
