@@ -191,7 +191,8 @@ class RemoteSh(multiprocessing.Process):
         logging.info('remote shell of host %s running in pid:%d %s', self.host.hostName, os.getpid(), self.name)
         clt = pexpect.pxssh.pxssh()
         flog = open('%s_%s.log' % (self.logPre, self.host.hostName), 'a')
-        flog.write('%s%s' % (time.strftime("%Y%m%d%H%M%S", time.localtime()),os.linesep))
+        flog.write('%s %s starting%s' % (time.strftime("%Y%m%d%H%M%S", time.localtime()), self.host.hostName, os.linesep))
+        flog.flush()
         clt.logfile = flog
         # clt.logfile = sys.stdout
         logging.info('connect to host: %s %s %s', self.host.hostName, self.host.hostIp, self.reCmd.user)
@@ -233,7 +234,7 @@ class RemoteSh(multiprocessing.Process):
 
     def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
         clt.sendline(suCmd)
-        i = clt.expect(['密码：', 'Password:',pexpect.TIMEOUT,pexpect.EOF])
+        i = clt.expect([u'密码：', 'Password:',pexpect.TIMEOUT,pexpect.EOF])
         if i==0 or i==1:
             clt.sendline(pwd)
             i = clt.expect(["su: 鉴定故障", r"[#$]", pexpect.TIMEOUT])
@@ -265,7 +266,9 @@ class ReShFac(object):
         self.dest = dest
 
     def makeCmd(self):
-        fCmd = open(self.cmdFile,'r')
+        logging.info('create cmd from %s', self.cmdFile)
+        fCmd = self.main.openFile(self.cmdFile,'r')
+        if not fCmd: return None
         i = 0
         user = None
         aCmds = []
@@ -273,16 +276,19 @@ class ReShFac(object):
             line = line.strip()
             if len(line) == 0:
                 continue
+            if line[0] == '#':
+                continue
             i += 1
             if i == 1:
-                aUser = line.split(' ')
+                aUser = line.split()
                 if len(aUser) < 2:
-                    logging.warn('comd no user,exit!')
+                    logging.error('comd no user,exit!')
                     exit(1)
-                user = aUser[1]
-                continue
-
-            if line[0] == '#':
+                if aUser == 'user':
+                    user = aUser[1]
+                else:
+                    logging.error('no user of 1st line in %s', self.cmdFile)
+                    exit(1)
                 continue
             aCmds.append(line)
         fCmd.close()
@@ -337,6 +343,16 @@ class ReShFac(object):
         logging.info('local host: %s' ,self.hostname)
         self.localIp = socket.gethostbyname(self.hostname)
         return self.localIp
+    def getHostIp(self):
+        self.hostName = socket.gethostname()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            self.hostIp = ip
+        finally:
+            s.close()
+        return ip
 
 
 class Director(object):
@@ -429,6 +445,14 @@ class Main(object):
         print "Usage: %s cmdfile" % self.baseName
         print "example:   %s %s" % (self.baseName,'mkdir.sh')
         exit(1)
+
+    def openFile(self, fileName, mode):
+        try:
+            f = open(fileName, mode)
+        except IOError, e:
+            logging.fatal('open file %s error: %s', fileName, e)
+            return None
+        return f
 
     def start(self):
         self.parseWorkEnv()
