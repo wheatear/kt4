@@ -382,6 +382,7 @@ class Main(object):
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
+        self.dirBin = dirBin
         # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
         appNameBody, appNameExt = os.path.splitext(appName)
         self.appNameBody = appNameBody
@@ -398,6 +399,9 @@ class Main(object):
                 dirApp = '.'
                 self.dirBin = dirBin
                 self.dirApp = dirApp
+            else:
+                self.dirApp = dirApp
+
         self.dirLog = os.path.join(self.dirApp, 'log')
         self.dirCfg = os.path.join(self.dirApp, 'config')
         self.dirTpl = os.path.join(self.dirApp, 'template')

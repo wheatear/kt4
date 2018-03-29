@@ -58,6 +58,7 @@ class Distribute(object):
         self.aDistStatus = []
         self.succ = []
         self.fail = []
+        self.fResult = None
 
     def makeAllHosts(self):
         conn = sqlite3.connect('kthosts.db')
@@ -92,10 +93,10 @@ class Distribute(object):
             status = self.scpFile(host)
             result = None
             if status:
-                result = '%s %s succ' % (hostName, self.file)
+                result = '%s %s %s succ' % (hostName, self.file, self.remoteDir)
                 self.succ.append(result)
             else:
-                result = '%s %s fail' % (hostName, self.file)
+                result = '%s %s %s fail' % (hostName, self.file, self.remoteDir)
                 self.fail.append(result)
             self.aHostStatus.append(result)
         # self.getCheckStatus()
