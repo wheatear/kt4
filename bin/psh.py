@@ -45,10 +45,12 @@ class Psh(object):
         self.passwd = None
         self.hostPre = main.hostPre
         self.fullHostName = '%s%s' % (self.hostPre, self.hostName)
-        self.dHost = {}
+        self.dHosts = {}
 
     def getAllHosts(self):
-        conn = sqlite3.connect('kthosts.db')
+        dbfile = os.path.join(self.main.dirBin, self.main.dbFile)
+        conn = sqlite3.connect(dbfile)
+        # print('db: %s' % dbfile)
         cursor = conn.cursor()
         cursor.execute('SELECT hostname,hostip FROM kthosts')
         rows = cursor.fetchall()
@@ -68,11 +70,11 @@ class Psh(object):
         conn.close()
         return self.dHosts
 
-    def login(self, original_prompt=r"[#$]"):
-        if self.hostName in self.dHost:
-            self.host = self.dHost[self.hostName]
-        elif self.fullHostName in self.dHost:
-            self.host = self.dHost[self.fullHostName]
+    def login(self, original_prompt=r"[#$%]"):
+        if self.hostName in self.dHosts:
+            self.host = self.dHosts[self.hostName]
+        elif self.fullHostName in self.dHosts:
+            self.host = self.dHosts[self.fullHostName]
         else:
             print('host error: no host %s' % self.hostName)
             exit(1)
@@ -88,44 +90,46 @@ class Psh(object):
             # New certificate -- always accept it.
             # This is what you get if SSH does not have the remote host's
             # public key stored in the 'known_hosts' cache.
-            self.sendline("yes")
-            i = self.expect(["(?i)are you sure you want to continue connecting", original_prompt,
+            child.sendline("yes")
+            i = child.expect(["(?i)are you sure you want to continue connecting", original_prompt,
                              "(?i)(?:password)|(?:passphrase for key)", "(?i)permission denied", "(?i)terminal type",
                              pexpect.TIMEOUT])
         if i == 2:  # password or passphrase
-            self.sendline(self.password)
-            i = self.expect(["(?i)are you sure you want to continue connecting", original_prompt,
+            child.sendline(self.passwd)
+            i = child.expect(["(?i)are you sure you want to continue connecting", original_prompt,
                              "(?i)(?:password)|(?:passphrase for key)", "(?i)permission denied", "(?i)terminal type",
                              pexpect.TIMEOUT])
         if i == 4:
-            self.sendline('ansi')
-            i = self.expect(["(?i)are you sure you want to continue connecting", original_prompt,
+            child.sendline('ansi')
+            i = child.expect(["(?i)are you sure you want to continue connecting", original_prompt,
                              "(?i)(?:password)|(?:passphrase for key)", "(?i)permission denied", "(?i)terminal type",
                              pexpect.TIMEOUT])
         if i == 7:
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('Could not establish connection to host')
 
         # Second phase
         if i == 0:
             # This is weird. This should not happen twice in a row.
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('Weird error. Got "are you sure" prompt twice.')
         elif i == 1:  # can occur if you have a public key pair set to authenticate.
             ### TODO: May NOT be OK if expect() got tricked and matched a false prompt.
-            pass
+            # pass
+            output = '%s%s' % (child.before, child.match.group())
+            print(output)
         elif i == 2:  # password prompt again
             # For incorrect passwords, some ssh servers will
             # ask for the password again, others return 'denied' right away.
             # If we get the password prompt again then this means
             # we didn't get the password right the first time.
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('password refused')
         elif i == 3:  # permission denied -- password was bad.
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('permission denied')
         elif i == 4:  # terminal type again? WTF?
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('Weird error. Got "terminal type" prompt twice.')
         elif i == 5:  # Timeout
             # This is tricky... I presume that we are at the command-line prompt.
@@ -135,14 +139,15 @@ class Psh(object):
             # I presume wrong and we are not logged in then this should be caught
             # later when I try to set the shell prompt.
             pass
+            # print(child.before)
         elif i == 6:  # Connection closed by remote host
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('connection closed')
         else:  # Unexpected
-            self.close()
+            child.close()
             raise pexpect.ExceptionPxssh('unexpected login response')
 
-        print(child.match.group())
+        print(child.buffer)
         child.interact()  # Give control of the child to the user.
 
 
@@ -153,9 +158,11 @@ class Main(object):
         self.host = None
         self.user = None
         self.hostPre = 'wb'
+        self.dbFile = 'kthosts.db'
 
     def checkArgv(self):
-        appName = os.path.basename(self.Name)
+        dirBin, appName = os.path.split(self.Name)
+        self.dirBin = dirBin
         self.appName = appName
         if self.argc < 2:
             self.usage()
