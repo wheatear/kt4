@@ -233,8 +233,8 @@ class RemoteSh(multiprocessing.Process):
 
     def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
         clt.sendline(suCmd)
-        i = clt.expect(['密码|Password:',pexpect.TIMEOUT,pexpect.EOF])
-        if i==0:
+        i = clt.expect(['密码：', 'Password:',pexpect.TIMEOUT,pexpect.EOF])
+        if i==0 or i==1:
             clt.sendline(pwd)
             i = clt.expect(["su: 鉴定故障", r"[#$]", pexpect.TIMEOUT])
         else:
