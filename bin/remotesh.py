@@ -191,6 +191,7 @@ class RemoteSh(multiprocessing.Process):
         logging.info('remote shell of host %s running in pid:%d %s', self.host.hostName, os.getpid(), self.name)
         clt = pexpect.pxssh.pxssh()
         flog = open('%s_%s.log' % (self.logPre, self.host.hostName), 'a')
+        flog.write('%s%s' % (time.strftime("%Y%m%d%H%M%S", time.localtime()),os.linesep))
         clt.logfile = flog
         # clt.logfile = sys.stdout
         logging.info('connect to host: %s %s %s', self.host.hostName, self.host.hostIp, self.reCmd.user)
@@ -232,7 +233,7 @@ class RemoteSh(multiprocessing.Process):
 
     def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
         clt.sendline(suCmd)
-        i = clt.expect(['密码：|Password:',pexpect.TIMEOUT,pexpect.EOF])
+        i = clt.expect(['密码|Password:',pexpect.TIMEOUT,pexpect.EOF])
         if i==0:
             clt.sendline(pwd)
             i = clt.expect(["su: 鉴定故障", r"[#$]", pexpect.TIMEOUT])
@@ -402,11 +403,13 @@ class Main(object):
         self.dirTpl = os.path.join(self.dirApp, 'template')
         self.dirLib = os.path.join(self.dirApp, 'lib')
 
+        self.today = time.strftime("%Y%m%d", time.localtime())
         cfgName = '%s.cfg' % self.appNameBody
-        logName = '%s.log' % self.appNameBody
+        logName = '%s_%s.log' % (self.appNameBody, self.today)
+        logPre = '%s_%s' % (self.appNameBody, self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
-        self.logPre = os.path.join(self.dirLog, self.appNameBody)
+        self.logPre = os.path.join(self.dirLog, logPre)
 
     def checkArgv(self):
         if self.argc < 2:
