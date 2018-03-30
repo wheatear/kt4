@@ -230,6 +230,7 @@ class RemoteSh(multiprocessing.Process):
             clt.prompt()
             logging.info('exec: %s', clt.before)
         clt.logout()
+        flog.write('%s %s end%s' % (time.strftime("%Y%m%d%H%M%S", time.localtime()), self.host.hostName, os.linesep))
         flog.close()
 
     def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
@@ -284,7 +285,7 @@ class ReShFac(object):
                 if len(aUser) < 2:
                     logging.error('comd no user,exit!')
                     exit(1)
-                if aUser == 'user':
+                if aUser[0] == 'user':
                     user = aUser[1]
                 else:
                     logging.error('no user of 1st line in %s', self.cmdFile)

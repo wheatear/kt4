@@ -104,7 +104,7 @@ class Distribute(object):
 
     def writeStatus(self):
         if not self.fResult or self.fResult.closed:
-            self.fResult = self.main.openFile(self.main.outFile, 'w')
+            self.fResult = self.main.openFile(self.main.outFile, 'a')
         for status in self.aHostStatus:
             self.fResult.write('%s%s' % (status, os.linesep))
         self.fResult.close()
