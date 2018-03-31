@@ -103,6 +103,7 @@ class PsParser(object):
         self.dDynamicPara = {}
         self.dEdsmpPara = {}
         self.dSyncPara = {}
+        self.dPsType = {}
 
     def makeParaModel(self):
         self.dComnPara = {
@@ -217,7 +218,7 @@ class PsParser(object):
         }
 
     # r'PARA_NAME_\d+=[^;]+;': 'PARA_NAME_1=@PARA_NAME_1@;'
-    def parseComnPara(self, psParam):
+    def parseComnPara(self, psParam, psServiceType):
         # logging.debug('parse common param: %s', psParam)
         # psPa = unicode(psParam, 'gbk')
         for varKey in self.dComnPara:
@@ -230,7 +231,14 @@ class PsParser(object):
         # psParam = psPa.encode('gbk')
         return psParam
 
-    def parseSyncPara(self, psParam):
+    def setPsType(self, varKey, psServiceType):
+        if psServiceType in self.dPsType[varKey]:
+            self.dPsType[varKey][psServiceType] +=1
+        else:
+            dType = {psServiceType:1}
+            self.dPsType[varKey] = dType
+
+    def parseSyncPara(self, psParam, psServiceType):
         # logging.debug('parse common param: %s', psParam)
         # psPa = unicode(psParam, 'gbk')
         for varKey in self.dSyncPara:
@@ -243,7 +251,7 @@ class PsParser(object):
         # psParam = psPa.encode('gbk')
         return psParam
 
-    def parseEdsmpPara(self, psParam):
+    def parseEdsmpPara(self, psParam, psServiceType):
         # logging.debug('parse common param: %s', psParam)
         for varKey in self.dEdsmpPara:
             if re.search(varKey, psParam):
@@ -251,7 +259,7 @@ class PsParser(object):
                 psParam = re.sub(varKey, varValue, psParam)
         return psParam
 
-    def parseDynamicPara(self, psParam):
+    def parseDynamicPara(self, psParam, psServiceType):
         # logging.debug('parse dynamic param: %s', psParam)
         for varKey in self.dDynamicPara:
             m = re.search(varKey, psParam)
@@ -264,7 +272,7 @@ class PsParser(object):
                 m = re.search(varKey, psParam)
         return psParam
 
-    def parseVgopPara(self, psParam):
+    def parseVgopPara(self, psParam, psServiceType):
         p1 = self.parseComnPara(psParam)
         p2 = self.parseDynamicPara((p1))
         return p2
@@ -285,18 +293,19 @@ class PsParser(object):
                 psKey = ''
                 actionId = row[1]
                 psParam = row[2]
+                psServiceType = row[0]
                 # logging.debug('parse %s %s', actionId, psParam)
                 if actionId == 1002:
                     psKey = 'action_id=1002;'
                 elif actionId == 1001:
-                    p1 = self.parseComnPara(psParam)
-                    psKey = self.parseDynamicPara(p1)
+                    p1 = self.parseComnPara(psParam, psServiceType)
+                    psKey = self.parseDynamicPara(p1, psServiceType)
                 elif actionId == 3000 or actionId == 3001:
-                    p1 = self.parseDynamicPara(psParam)
-                    psKey = self.parseEdsmpPara(p1)
+                    p1 = self.parseDynamicPara(psParam, psServiceType)
+                    psKey = self.parseEdsmpPara(p1, psServiceType)
                 else:
-                    psKey = self.parseComnPara(psParam)
-                    psKey = self.parseSyncPara(psParam)
+                    p1 = self.parseComnPara(psParam, psServiceType)
+                    psKey = self.parseSyncPara(p1, psServiceType)
 
                 if psKey in self.dPs:
                     self.dPs[psKey][8] += 1
@@ -390,6 +399,10 @@ class PsParser(object):
         cur.close()
         total += i
         logging.debug('timeer %f save %d rows, total %d', time.time(), i, total)
+        logging.info('var model statistic:')
+        for key in self.dPsType:
+            for pt in self.dPsType[key]:
+                logging.info('%s %s %d', key, pt, self.dPsType[key][pt])
 
 
 
