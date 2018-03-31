@@ -401,8 +401,10 @@ class PsParser(object):
         logging.debug('timeer %f save %d rows, total %d', time.time(), i, total)
         logging.info('var model statistic:')
         for key in self.dPsType:
+            ptinfo = ''
             for pt in self.dPsType[key]:
-                logging.info('%s %s %d', key, pt, self.dPsType[key][pt])
+                ptinfo = '%s%s %d, ' % (pt,self.dPsType[key][pt])
+            logging.info('%s %s', key, ptinfo)
 
 
 
