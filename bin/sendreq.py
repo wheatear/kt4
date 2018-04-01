@@ -1175,6 +1175,7 @@ class Main(object):
         fac = FileFac(self)
         return fac
 
+    @staticmethod
     def createInstance(module_name, class_name, *args, **kwargs):
         module_meta = __import__(module_name, globals(), locals(), [class_name])
         class_meta = getattr(module_meta, class_name)
