@@ -278,8 +278,10 @@ class PsParser(object):
         return p2
 
     def parsePs(self):
-        # sql = 'select ps_service_type,action_id,ps_param,ps_id,bill_id,sub_bill_id,region_code,create_date from %s' % self.psTable
-        sql = 'select ps_service_type,action_id,sync_param,ps_id,bill_id,sub_bill_id,log_name,create_date from %s' % self.psTable
+        # async order
+        sql = 'select ps_service_type,action_id,ps_param,ps_id,bill_id,sub_bill_id,region_code,create_date from %s' % self.psTable
+        # sync order
+        # sql = 'select ps_service_type,action_id,sync_param,ps_id,bill_id,sub_bill_id,log_name,create_date from %s' % self.psTable
         cur = self.db.conn.cursor()
         cur.execute(sql)
         cur.arraysize = 10000
