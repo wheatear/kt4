@@ -548,6 +548,10 @@ class FileFac(object):
         return self.dNetClient
 
 
+class TableFac(FileFac):
+    pass
+
+
 class HttpShortClient(object):
     def __init__(self, netInfo):
         self.dNetInfo = netInfo
@@ -1129,8 +1133,23 @@ class Main(object):
             self.usage()
         # self.checkopt()
         argvs = sys.argv[1:]
-        self.cmdFile = sys.argv[1]
-        self.dsIn = sys.argv[2]
+        self.facType = 'f'
+        try:
+            opts, arvs = getopt.getopt(argvs, "t:")
+        except getopt.GetoptError, e:
+            orderMode = 't'
+            print 'get opt error:%s. %s' % (argvs,e)
+            # self.usage()
+        for opt, arg in opts:
+            # print 'opt: %s' % opt
+            if opt == '-t':
+                self.facType = 't'
+                self.cmdFile = arg
+        if self.facType == 'f':
+            self.cmdFile = arvs[0]
+            self.dsIn = arvs[1]
+        else:
+            self.dsIn = arvs[0]
         # self.logFile = '%s%s' % (self.dsIn, '.log')
         # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
@@ -1148,6 +1167,19 @@ class Main(object):
         return f
 
     def makeFactory(self):
+        if self.facType == 't':
+            return self.makeTableFactory()
+        elif self.facType == 'f':
+            return self.makeFileFactory()
+        
+    def makeTableFactory(self):
+        self.netType = 'KTPS'
+        self.netCode = 'kt4'
+        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+        fac = TableFac(self)
+        return fac
+
+    def makeFileFactory(self):
         if not self.fCmd:
             self.fCmd = self.openFile(self.cmdFile, 'r')
             logging.info('cmd file: %s', self.cmdFile)
