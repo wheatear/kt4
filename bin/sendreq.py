@@ -22,18 +22,22 @@ import re
 import signal
 import logging
 from socket import *
-
+import cx_Oracle as orcl
 
 class Conf(object):
-    def __init__(self, cfgfile):
+    def __init__(self, main, cfgfile):
+        self.main = main
         self.cfgFile = cfgfile
         self.logLevel = None
-        self.fCfg = None
+        # self.fCfg = None
         self.dNet = {}
+        self.rows = []
+        self.conn = None
 
     def loadLogLevel(self):
-        fCfg = self.openCfg()
-        for line in fCfg:
+        rows = self.openCfg()
+        loglevelRow = []
+        for line in rows:
             line = line.strip()
             if len(line) == 0:
                 continue
@@ -43,28 +47,31 @@ class Conf(object):
                 param = line.split(' = ', 1)
                 logLevel = 'logging.%s' % param[1]
                 self.logLevel = eval(logLevel)
+                loglevelRow.append(line)
                 break
-        fCfg.close()
+        self.removeUser(loglevelRow)
         return self.logLevel
 
-    def openCfg(self):
-        if self.fCfg and not self.fCfg.closed: return self.fCfg
-        try:
-            self.fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        return self.fCfg
+    def removeUsed(self, lines):
+        for line in lines:
+            self.rows.remove(line)
 
-    def closeCfg(self):
-        if self.fCfg: self.fCfg.close()
+    def openCfg(self):
+        if len(self.rows) > 0 : return self.rows
+        fCfg = self.main.openFile(self.cfgFile)
+        self.rows = fCfg.readlines()
+        fCfg.close()
+        return self.rows
+
+    # def closeCfg(self):
+    #     if self.fCfg: self.fCfg.close()
 
     def loadNet(self):
-        fCfg = self.openCfg()
+        rows = self.openCfg()
         netSection = 0
         net = None
-        for line in fCfg:
+        netRows = []
+        for line in rows:
             line = line.strip()
             if len(line) == 0:
                 if net is not None:
@@ -91,29 +98,22 @@ class Conf(object):
             if netSection < 1:
                 continue
             logging.debug(line)
+            netRows.append(line)
             param = line.split(' = ', 1)
             if len(param) > 1:
                 net[param[0]] = param[1]
             else:
                 net[param[0]] = None
-
-        self.closeCfg()
+        self.removeUsed(netRows)
         logging.info('load %d net.', len(self.dNet))
         return self.dNet
 
     def loadEnv(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
+        rows = self.openCfg()
         envSection = 0
         client = None
-        for line in fCfg:
+        envRows = []
+        for line in rows:
             line = line.strip()
             if len(line) == 0:
                 continue
@@ -150,7 +150,7 @@ class Conf(object):
                 client.syncServer = param[1]
             elif param[0] == 'sockPort':
                 client.sockPort = param[1]
-        fCfg.close()
+        self.removeUsed(envRows)
         logging.info('load %d clients.', len(self.aClient))
         return self.aClient
 
@@ -247,6 +247,132 @@ class QSub(object):
         self.recvRsp()
 
 
+class HttpShortClient(object):
+    def __init__(self, netInfo):
+        self.dNetInfo = netInfo
+        # self.fCmd = cmdfile
+        self.httpHead = None
+        self.httpRequest = None
+        self.aCmdTemplates = []
+        self.httpHead = None
+        self.httpBody = None
+        self.remoteServer = None
+
+    # def makeCmdTempate(self):
+    #     for tmpl in self.aCmdTemplates:
+    #         msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
+    #         msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
+    #         tmpl.setMsg(msg)
+
+    def tmplReplaceNetInfo(self):
+        for var in self.dNetInfo:
+            varPlace = '^<%s^>' % var
+            for tmpl in self.aCmdTemplates:
+                if var in tmpl.aVariables:
+                    msg = tmpl.cmdTmpl.replace(varPlace, self.dNetInfo[var])
+                    tmpl.setMsg(msg)
+
+    def httpheadReplaceNetInfo(self):
+        for var in self.dNetInfo:
+            varPlace = '^<%s^>' % var
+            if varPlace in self.httpHead:
+                httpHead = self.httpHead.replace(varPlace, self.dNetInfo[var])
+                self.httpHead = httpHead
+
+    def makeHttpHead(self):
+        httpHead = 'POST ^<GLOBAL_URL^> HTTP/1.1\r\n'
+        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<Ip^>:^<Port^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
+        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
+        self.httpHead = httpHead
+        self.httpheadReplaceNetInfo()
+
+    def makeHttpMsg(self, order):
+        for tmpl in self.aCmdTemplates:
+            httpBody = tmpl.cmdTmpl
+            for var in tmpl.aVariables:
+                logging.debug('find var %s', var)
+                logging.debug('find var %s', order.dParam.keys())
+                if var not in order.dParam:
+                    logging.debug('dont find var %s', var)
+                    logging.fatal('%s order have no field %s.', order.dParam['BILL_ID'], var)
+                    return -1
+                paName = '^<%s^>' % var
+                if httpBody.find(paName) > -1:
+                    httpBody = httpBody.replace(paName, order.dParam[var])
+            contentLength = len(httpBody)
+            httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
+            httpRequest = '%s%s' % (httpHead, httpBody)
+            logging.debug(httpRequest)
+            order.aReqMsg.append(httpRequest)
+
+    def sendOrder(self, order):
+        self.makeHttpMsg(order)
+        # logging.debug(order.httpRequest)
+        for req in order.aReqMsg:
+            logging.debug('send:%s', req)
+            self.remoteServer.send(req)
+            self.recvResp(order)
+
+    def connectServer(self):
+        if self.remoteServer: self.remoteServer.close()
+        # if self.remoteServer: return self.remoteServer
+        self.remoteServer = TcpClt(self.dNetInfo['Ip'], int(self.dNetInfo['Port']))
+        return self.remoteServer
+
+    def recvResp(self, order):
+        logging.info('receive orders response...')
+        rspMsg = self.remoteServer.recv()
+        logging.debug(rspMsg)
+        logging.info('parse orders response...')
+        resp = {}
+        resp['response'] = rspMsg.replace('\r\n','\\r\\n')
+        resp['status'] = 'UNKNOWN'
+        if 'RSP_SUCCESS' not in self.dNetInfo:
+            order.aResp.append(resp)
+            logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+            return True
+
+        if rspMsg.find(self.dNetInfo['RSP_SUCCESS']) > -1:
+            resp['response'] = 'success'
+            resp['status'] = 'success'
+        else:
+            resp['status'] = 'fail'
+        order.aResp.append(resp)
+        logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+        # order.rspMsg = rspMsg
+        return True
+
+
+class ReqOrder(object):
+    def __init__(self):
+        self.no = None
+        self.aParamName = []
+        self.dParam = {}
+        self.net = None
+        self.aReqMsg = []
+        self.aResp = []
+
+    def setParaName(self, aParaNames):
+        self.aParamName = aParaNames
+
+    def setPara(self, paras):
+        for i, pa in enumerate(paras):
+            key = self.aParamName[i]
+            self.dParam[key] = pa
+
+    def getStatus(self):
+        status = ''
+        for resp in self.aResp:
+            status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
+        return status
+
+
 class KtClient(object):
     def __init__(self):
         # self.cfgFile = cfgfile
@@ -293,6 +419,22 @@ class CmdTemplate(object):
         self.cmdTmpl = cmdMsg
         self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
 
+
+class KtPsTmpl(CmdTemplate):
+    def __init__(self, cmdTmpl):
+        super(self.__class__, self).__init(cmdTmpl)
+        self.varExpt = r'@(.+?)@'
+
+    def setMsg(self, cmdMsg):
+        pass
+
+
+class KtPsOrder(ReqOrder):
+    pass
+
+
+class KtPsClient(HttpShortClient):
+    pass
 
 
 class CentrexClient(object):
@@ -549,133 +691,10 @@ class FileFac(object):
 
 
 class TableFac(FileFac):
-    pass
-
-
-class HttpShortClient(object):
-    def __init__(self, netInfo):
-        self.dNetInfo = netInfo
-        # self.fCmd = cmdfile
-        self.httpHead = None
-        self.httpRequest = None
-        self.aCmdTemplates = []
-        self.httpHead = None
-        self.httpBody = None
-        self.remoteServer = None
-
-    # def makeCmdTempate(self):
-    #     for tmpl in self.aCmdTemplates:
-    #         msg = tmpl.cmdTmpl.replace('^<GLOBAL_USER^>', self.user)
-    #         msg = msg.replace('^<GLOBAL_PASSWD^>', self.passwd)
-    #         tmpl.setMsg(msg)
-
-    def tmplReplaceNetInfo(self):
-        for var in self.dNetInfo:
-            varPlace = '^<%s^>' % var
-            for tmpl in self.aCmdTemplates:
-                if var in tmpl.aVariables:
-                    msg = tmpl.cmdTmpl.replace(varPlace, self.dNetInfo[var])
-                    tmpl.setMsg(msg)
-
-    def httpheadReplaceNetInfo(self):
-        for var in self.dNetInfo:
-            varPlace = '^<%s^>' % var
-            if varPlace in self.httpHead:
-                httpHead = self.httpHead.replace(varPlace, self.dNetInfo[var])
-                self.httpHead = httpHead
-
-    def makeHttpHead(self):
-        httpHead = 'POST ^<GLOBAL_URL^> HTTP/1.1\r\n'
-        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
-        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
-        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
-        httpHead = '%s%s' % (httpHead, 'Host: ^<Ip^>:^<Port^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
-        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
-        self.httpHead = httpHead
-        self.httpheadReplaceNetInfo()
-
-    def makeHttpMsg(self, order):
-        for tmpl in self.aCmdTemplates:
-            httpBody = tmpl.cmdTmpl
-            for var in tmpl.aVariables:
-                logging.debug('find var %s', var)
-                logging.debug('find var %s', order.dParam.keys())
-                if var not in order.dParam:
-                    logging.debug('dont find var %s', var)
-                    logging.fatal('%s order have no field %s.', order.dParam['BILL_ID'], var)
-                    return -1
-                paName = '^<%s^>' % var
-                if httpBody.find(paName) > -1:
-                    httpBody = httpBody.replace(paName, order.dParam[var])
-            contentLength = len(httpBody)
-            httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
-            httpRequest = '%s%s' % (httpHead, httpBody)
-            logging.debug(httpRequest)
-            order.aReqMsg.append(httpRequest)
-
-    def sendOrder(self, order):
-        self.makeHttpMsg(order)
-        # logging.debug(order.httpRequest)
-        for req in order.aReqMsg:
-            logging.debug('send:%s', req)
-            self.remoteServer.send(req)
-            self.recvResp(order)
-
-    def connectServer(self):
-        if self.remoteServer: self.remoteServer.close()
-        # if self.remoteServer: return self.remoteServer
-        self.remoteServer = TcpClt(self.dNetInfo['Ip'], int(self.dNetInfo['Port']))
-        return self.remoteServer
-
-    def recvResp(self, order):
-        logging.info('receive orders response...')
-        rspMsg = self.remoteServer.recv()
-        logging.debug(rspMsg)
-        logging.info('parse orders response...')
-        resp = {}
-        resp['response'] = rspMsg.replace('\r\n','\\r\\n')
-        resp['status'] = 'UNKNOWN'
-        if 'RSP_SUCCESS' not in self.dNetInfo:
-            order.aResp.append(resp)
-            logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
-            return True
-
-        if rspMsg.find(self.dNetInfo['RSP_SUCCESS']) > -1:
-            resp['response'] = 'success'
-            resp['status'] = 'success'
-        else:
-            resp['status'] = 'fail'
-        order.aResp.append(resp)
-        logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
-        # order.rspMsg = rspMsg
-        return True
-
-
-class ReqOrder(object):
-    def __init__(self):
-        self.no = None
-        self.aParamName = []
-        self.dParam = {}
-        self.net = None
-        self.aReqMsg = []
-        self.aResp = []
-
-    def setParaName(self, aParaNames):
-        self.aParamName = aParaNames
-
-    def setPara(self, paras):
-        for i, pa in enumerate(paras):
-            key = self.aParamName[i]
-            self.dParam[key] = pa
-
-    def getStatus(self):
-        status = ''
-        for resp in self.aResp:
-            status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
-        return status
+    def __init__(self, main):
+        super(self.__class__, self).__init__(main)
+        self.respName = '%s_rsp' % os.path.basename(self.main.outFile)
+        self.respFullName = self.respName
 
 
 class HttpShortOrder(ReqOrder):
@@ -1154,7 +1173,7 @@ class Main(object):
         # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
     def usage(self):
-        print "Usage: %s cmdfile datafile" % self.appName
+        print "Usage: %s [-t] cmdfile datafile" % self.appName
         print "example:   %s %s" % (self.appName,'creatUser teldata')
         exit(1)
 
@@ -1173,7 +1192,7 @@ class Main(object):
             return self.makeFileFactory()
 
     def makeTableFactory(self):
-        self.netType = 'KTPS'
+        self.netType = 'KtPs'
         self.netCode = 'kt4'
         logging.info('net type: %s  net code: %s', self.netType, self.netCode)
         fac = TableFac(self)
