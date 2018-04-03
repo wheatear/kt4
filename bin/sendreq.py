@@ -1171,7 +1171,7 @@ class Main(object):
             return self.makeTableFactory()
         elif self.facType == 'f':
             return self.makeFileFactory()
-        
+
     def makeTableFactory(self):
         self.netType = 'KTPS'
         self.netCode = 'kt4'
