@@ -32,12 +32,12 @@ class Conf(object):
         # self.fCfg = None
         self.dNet = {}
         self.rows = []
-        self.conn = None
+        self.dbinfo = {}
 
     def loadLogLevel(self):
         rows = self.openCfg()
         loglevelRow = []
-        for line in rows:
+        for i, line in enumerate(rows):
             line = line.strip()
             if len(line) == 0:
                 continue
@@ -47,14 +47,14 @@ class Conf(object):
                 param = line.split(' = ', 1)
                 logLevel = 'logging.%s' % param[1]
                 self.logLevel = eval(logLevel)
-                loglevelRow.append(line)
+                loglevelRow.append(i)
                 break
-        self.removeUser(loglevelRow)
+        self.removeUsed(loglevelRow)
         return self.logLevel
 
     def removeUsed(self, lines):
         for line in lines:
-            self.rows.remove(line)
+            self.rows.pop(line)
 
     def openCfg(self):
         if len(self.rows) > 0 : return self.rows
@@ -71,7 +71,7 @@ class Conf(object):
         netSection = 0
         net = None
         netRows = []
-        for line in rows:
+        for i, line in enumerate(rows):
             line = line.strip()
             if len(line) == 0:
                 if net is not None:
@@ -98,7 +98,7 @@ class Conf(object):
             if netSection < 1:
                 continue
             logging.debug(line)
-            netRows.append(line)
+            netRows.append(i)
             param = line.split(' = ', 1)
             if len(param) > 1:
                 net[param[0]] = param[1]
@@ -108,51 +108,32 @@ class Conf(object):
         logging.info('load %d net.', len(self.dNet))
         return self.dNet
 
-    def loadEnv(self):
+    def loadDbinfo(self):
         rows = self.openCfg()
-        envSection = 0
+        dbSection = 0
         client = None
-        envRows = []
-        for line in rows:
+        dbRows = []
+        for i, line in enumerate(rows):
             line = line.strip()
             if len(line) == 0:
+                dbSection = 1
                 continue
-            if line == '#running envirment conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtClient()
+            if line == '#DBCONF':
+                dbSection = 1
                 continue
-            if clientSection < 1:
+            if dbSection < 1:
                 continue
             logging.debug(line)
+            dbRows.append(i)
             param = line.split(' = ', 1)
-            if param[0] == 'prvnName':
-                client.ktName = param[1]
-            elif param[0] == 'dbusr':
-                client.dbUser = param[1]
-            elif param[0] == 'type':
-                client.ktType = param[1]
-            elif param[0] == 'dbpwd':
-                client.dbPwd = param[1]
-            elif param[0] == 'dbhost':
-                client.dbHost = param[1]
-            elif param[0] == 'dbport':
-                client.dbPort = param[1]
-            elif param[0] == 'dbsid':
-                client.dbSid = param[1]
-            elif param[0] == 'table':
-                client.orderTablePre = param[1]
-            elif param[0] == 'server':
-                client.syncServer = param[1]
-            elif param[0] == 'sockPort':
-                client.sockPort = param[1]
-        self.removeUsed(envRows)
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
+            if len(param) > 1:
+                self.dbinfo[param[0]] = param[1]
+            else:
+                self.dbinfo[param[0]] = None
+        self.removeUsed(dbRows)
+        self.dbinfo['connstr'] = '%s/%s@%s/%s' % (self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
+        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbuser'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
+        return self.dbinfo
 
 
 class TcpClt(object):
@@ -395,18 +376,7 @@ class KtClient(object):
         self.dAsyncStatusCur = {}
         self.dAsyncTaskCur = {}
 
-    # def connDb(self):
-    #     if self.conn: return self.conn
-    #     try:
-    #         connstr = '%s/%s@%s/%s' % (self.dbUser, self.dbPwd, self.dbHost, self.dbSid)
-    #         self.conn = orcl.Connection(connstr)
-    #         # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
-    #         # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
-    #         # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
-    #     except Exception, e:
-    #         logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.dbHost, self.dbUser, self.dbSid, e)
-    #         exit()
-    #     return self.conn
+
 
 
 class CmdTemplate(object):
@@ -434,7 +404,37 @@ class KtPsOrder(ReqOrder):
 
 
 class KtPsClient(HttpShortClient):
-    pass
+    def __init__(self, netInfo):
+        self.dNetInfo = netInfo
+        self.conn = None
+
+    def tmplReplaceNetInfo(self):
+        return True
+
+    def makeHttpHead(self):
+        return True
+
+    def sendOrder(self, order):
+        self.makeHttpMsg(order)
+        # logging.debug(order.httpRequest)
+        for req in order.aReqMsg:
+            logging.debug('send:%s', req)
+            self.remoteServer.send(req)
+            self.recvResp(order)
+
+    def connectServer(self):
+        if self.conn: return self.conn
+        # if self.remoteServer: return self.remoteServer
+        connstr = '%s/%s@%s/%s' % (self.dNetInfo['dbusr'], self.dNetInfo['dbpwd'], self.dNetInfo['dbhost'], self.dNetInfo['dbsid'])
+        try:
+            self.conn = orcl.Connection(connstr)
+            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
+            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
+            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+        except Exception, e:
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+            exit()
+        return self.conn
 
 
 class CentrexClient(object):
@@ -620,7 +620,7 @@ class FileFac(object):
         if self.resp: return self.resp
         self.resp = self.main.openFile(self.respFullName, 'a')
         logging.info('open response file: %s', self.respName)
-        if self.orderDs is None:
+        if self.resp is None:
             logging.fatal('Can not open response file %s.', self.respName)
             exit(2)
         return self.resp
@@ -631,6 +631,7 @@ class FileFac(object):
         self.aFildName = fildName.split()
 
     def makeOrder(self):
+        orderClassName = '%sOrder' % self.netType
         for line in self.orderDs:
             line = line.strip()
             if len(line) == 0:
@@ -638,7 +639,7 @@ class FileFac(object):
             if line[0] == '#':
                 continue
             aParams = line.split()
-            orderClassName = '%sOrder' % self.netType
+
             order = createInstance(self.main.appNameBody, orderClassName)
             order.setParaName(self.aFildName)
             order.setPara(aParams)
@@ -695,6 +696,23 @@ class TableFac(FileFac):
         super(self.__class__, self).__init__(main)
         self.respName = '%s_rsp' % os.path.basename(self.main.outFile)
         self.respFullName = self.respName
+        self.conn = main.conn
+        self.cmdTab = self.main.cmdFile
+
+    def loadCmd(self):
+        tmpl = None
+        tmplMsg = ''
+        sql = 'select rownum,ps_id,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
+        cur = self.main.prepareSql(sql)
+        cur.execute(None)
+        rows = cur.fetchall()
+        for line in rows:
+            tmpl = KtPsTmpl(line)
+            self.aCmdTemplates.append(tmpl)
+            logging.info(line)
+
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        self.main.fCmd.close()
 
 
 class HttpShortOrder(ReqOrder):
@@ -1070,8 +1088,6 @@ class Director(object):
         self.factory.openDs()
         self.factory.makeOrderFildName()
         self.fRsp = self.factory.openRsp()
-        # client.loadClient()
-        # client.loadCmd()
         i = 0
         while not self.shutDown:
             logging.debug('timeer %f load order', time.time())
@@ -1100,6 +1116,7 @@ class Main(object):
         self.caseDs = None
         self.netType = None
         self.netCode = None
+        self.conn = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -1185,6 +1202,29 @@ class Main(object):
             return None
         return f
 
+    def connDb(self):
+        if self.conn: return self.conn
+        try:
+            connstr = self.cfg.dbinfo['connstr']
+            self.conn = orcl.Connection(connstr)
+            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
+            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
+            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+        except Exception, e:
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+            exit()
+        return self.conn
+
+    def prepareSql(self, sql):
+        logging.info('prepare sql: %s', sql)
+        cur = self.conn.cursor()
+        try:
+            cur.prepare(sql)
+        except orcl.DatabaseError, e:
+            logging.error('prepare sql err: %s', sql)
+            return None
+        return cur
+
     def makeFactory(self):
         if self.facType == 't':
             return self.makeTableFactory()
@@ -1244,6 +1284,8 @@ class Main(object):
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
 
+        self.cfg.loadDbinfo()
+        self.connDb()
         self.cfg.loadNet()
         factory = self.makeFactory()
         print('respfile: %s' % factory.respFullName)
