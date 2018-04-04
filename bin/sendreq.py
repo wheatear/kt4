@@ -260,6 +260,10 @@ class HttpShortClient(object):
                 httpHead = self.httpHead.replace(varPlace, self.dNetInfo[var])
                 self.httpHead = httpHead
 
+    def prepareTmpl(self):
+        self.tmplReplaceNetInfo()
+        self.makeHttpHead()
+
     def makeHttpHead(self):
         httpHead = 'POST ^<GLOBAL_URL^> HTTP/1.1\r\n'
         httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
@@ -377,8 +381,6 @@ class KtClient(object):
         self.dAsyncTaskCur = {}
 
 
-
-
 class CmdTemplate(object):
     def __init__(self, cmdTmpl):
         self.cmdTmpl = cmdTmpl
@@ -395,8 +397,11 @@ class KtPsTmpl(CmdTemplate):
         super(self.__class__, self).__init(cmdTmpl)
         self.varExpt = r'@(.+?)@'
 
-    def setMsg(self, cmdMsg):
+    def setMsg(self, tmpl):
         pass
+        # self.cmdTmpl = tmpl
+        # for field in tmpl:
+        #     self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
 
 
 class KtPsOrder(ReqOrder):
@@ -404,18 +409,102 @@ class KtPsOrder(ReqOrder):
 
 
 class KtPsClient(HttpShortClient):
+    dSql = {}
+    dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
+    dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
+    dSql['IPS'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,:createDate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
+
+    dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
+    dCur = {}
+
     def __init__(self, netInfo):
         self.dNetInfo = netInfo
         self.conn = None
 
-    def tmplReplaceNetInfo(self):
+    def prepareSql(self, sql):
+        logging.info('prepare sql: %s', sql)
+        cur = self.conn.cursor()
+        try:
+            cur.prepare(sql)
+        except orcl.DatabaseError, e:
+            logging.error('prepare sql err: %s', sql)
+            return None
+        return cur
+
+    def executemanyCur(self, cur, params):
+        logging.info('execute cur %s', cur.statement)
+        try:
+            cur.executemany(None, params)
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return cur
+
+    def fetchmany(self, cur):
+        logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
+        try:
+            rows = cur.fetchmany()
+        except orcl.DatabaseError, e:
+            logging.error('fetch sql err %s:%s ', e, cur.statement)
+            return None
+        return rows
+
+    def fetchone(self, cur):
+        logging.debug('fethone from %s', cur.statement)
+        try:
+            row = cur.fetchone()
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return row
+
+    def executeCur(self, cur, params=None):
+        logging.info('execute cur %s', cur.statement)
+        try:
+            if params is None:
+                cur.execute(None)
+            else:
+                cur.execute(None, params)
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return cur
+
+    def getCurbyName(self, curName):
+        if self.dCur[curName] is not None: return self.dCur[curName]
+        if curName not in self.dSql:
+            return None
+        sql = self.dSql[curName]
+        cur = self.prepareSql(sql)
+        self.dCur[curName] = cur
+        return cur
+
+    def prepareTmpl(self):
         return True
 
-    def makeHttpHead(self):
-        return True
+    def getOrderId(self, order):
+        sql = self.__class__.dSql['OrderId']
+        cur = self.conn.cursor()
+        cur.prepare(sql)
+        dPara = {'rownum':1}
+        cur.execute(None, dPara)
+        row = cur.fetchone()
+        order.dParam['PS_ID'] = row[0]
+        order.dParam['DONE_CODE'] = row[1]
+
+    def getRegionCode(self, order):
+        sql = self.__class__.dSql['RegionCode']
+        cur = self.getCurbyName('RegionCode')
+        if 'BILL_ID' not in order.dParam: return False
+        dVar = {'BILL_ID':order.dParam['BILL_ID']}
+        self.executeCur(cur, dVar)
+        row = self.fetchone(cur)
+        order.dParam['DONE_CODE'] = row[0]
+
 
     def sendOrder(self, order):
-        self.makeHttpMsg(order)
+        self.getOrderId(order)
+        self.getRegionCode(order)
         # logging.debug(order.httpRequest)
         for req in order.aReqMsg:
             logging.debug('send:%s', req)
@@ -684,8 +773,9 @@ class FileFac(object):
             # print netInfo
             net = createInstance(self.main.appNameBody, netClassName, netInfo)
             net.aCmdTemplates= self.aCmdTemplates
-            net.tmplReplaceNetInfo()
-            net.makeHttpHead()
+            net.prepareTmpl()
+            # net.tmplReplaceNetInfo()
+            # net.makeHttpHead()
             netCode = netInfo['NetCode']
             self.dNetClient[netCode] = net
         return self.dNetClient
@@ -702,7 +792,7 @@ class TableFac(FileFac):
     def loadCmd(self):
         tmpl = None
         tmplMsg = ''
-        sql = 'select rownum,ps_id,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
+        sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
         cur = self.main.prepareSql(sql)
         cur.execute(None)
         rows = cur.fetchall()
