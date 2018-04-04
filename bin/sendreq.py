@@ -408,18 +408,25 @@ class KtPsOrder(ReqOrder):
     pass
 
 
-class KtPsClient(HttpShortClient):
-    dSql = {}
-    dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
-    dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
-    dSql['IPS'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,:createDate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
-
-    dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
-    dCur = {}
-
-    def __init__(self, netInfo):
-        self.dNetInfo = netInfo
+class DbConn(object):
+    def __init__(self, dbInfo):
+        self.dbInfo = dbInfo
         self.conn = None
+        # self.connectServer()
+
+    def connectServer(self):
+        if self.conn: return self.conn
+        # if self.remoteServer: return self.remoteServer
+        connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
+        try:
+            self.conn = orcl.Connection(connstr)
+            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
+            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
+            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+        except Exception, e:
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+            exit()
+        return self.conn
 
     def prepareSql(self, sql):
         logging.info('prepare sql: %s', sql)
@@ -458,6 +465,15 @@ class KtPsClient(HttpShortClient):
             return None
         return row
 
+    def fetchall(self, cur):
+        logging.debug('fethone from %s', cur.statement)
+        try:
+            rows = cur.fetchall()
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return rows
+
     def executeCur(self, cur, params=None):
         logging.info('execute cur %s', cur.statement)
         try:
@@ -470,60 +486,92 @@ class KtPsClient(HttpShortClient):
             return None
         return cur
 
+
+class KtPsClient(HttpShortClient):
+    dSql = {}
+    dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
+    dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
+    dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,sysdate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
+    dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
+    dCur = {}
+
+    def __init__(self, netInfo):
+        self.dNetInfo = netInfo
+        self.orderTablePre = 'i_provision'
+        self.conn = None
+
+    def connectServer(self):
+        if self.conn is not None: return self.conn
+        self.conn = DbConn(self.dNetInfo)
+        self.conn.connectServer()
+        return self.conn
+
     def getCurbyName(self, curName):
         if self.dCur[curName] is not None: return self.dCur[curName]
-        if curName not in self.dSql:
+        if (curName[:6] != 'SendPs') and (curName not in self.dSql):
             return None
-        sql = self.dSql[curName]
-        cur = self.prepareSql(sql)
+        sql = ''
+        if curName[:6] == 'SendPs':
+            namePre = curName[:6]
+            regionCode = curName[6:]
+            sql = self.dSql[namePre] % (self.orderTablePre, regionCode)
+        else:
+            sql = self.dSql[curName]
+        cur = self.conn.prepareSql(sql)
         self.dCur[curName] = cur
         return cur
 
     def prepareTmpl(self):
         return True
 
+    def setOrderCmd(self, order):
+        order.aReqMsg = self.aCmdTemplates
+        for cmd in order.aReqMsg:
+            psParam = cmd['PS_PARAM']
+            for para in order.dParam:
+                pattern = r'[;^]%s=(.*?);' % para
+                m = re.search(pattern, psParam)
+                if m is not None:
+                    rpl = ';%s=%s;' % (para, order.dParam[para])
+                    cmd['PS_PARAM'] = psParam.replace(m.group(), rpl)
+
     def getOrderId(self, order):
-        sql = self.__class__.dSql['OrderId']
-        cur = self.conn.cursor()
-        cur.prepare(sql)
+        # sql = self.__class__.dSql['OrderId']
+        cur = self.getCurbyName('OrderId')
         dPara = {'rownum':1}
-        cur.execute(None, dPara)
-        row = cur.fetchone()
-        order.dParam['PS_ID'] = row[0]
-        order.dParam['DONE_CODE'] = row[1]
+        num = len(order.aReqMsg)
+        self.conn.executeCur(cur, num)
+        rows = self.conn.fetchone(cur)
+        for i,cmd in enumerate(order.aReqMsg):
+            cmd['PS_ID'] = rows[i][0]
+            cmd['DONE_CODE'] = rows[i][1]
 
     def getRegionCode(self, order):
-        sql = self.__class__.dSql['RegionCode']
+        # sql = self.__class__.dSql['RegionCode']
         cur = self.getCurbyName('RegionCode')
         if 'BILL_ID' not in order.dParam: return False
         dVar = {'BILL_ID':order.dParam['BILL_ID']}
-        self.executeCur(cur, dVar)
-        row = self.fetchone(cur)
-        order.dParam['DONE_CODE'] = row[0]
-
+        self.conn.executeCur(cur, dVar)
+        row = self.conn.fetchone(cur)
+        order.dParam['REGION_CODE'] = row[0]
+        for req in order.aReqMsg:
+            req['REGION_CODE'] = order.dParam['REGION_CODE']
 
     def sendOrder(self, order):
+        self.connectServer()
+        self.setOrderCmd(order)
         self.getOrderId(order)
         self.getRegionCode(order)
+        curName = 'SendPs%s' % order.dParam['REGION_CODE']
+        cur = self.getCurbyName(curName)
         # logging.debug(order.httpRequest)
-        for req in order.aReqMsg:
-            logging.debug('send:%s', req)
-            self.remoteServer.send(req)
-            self.recvResp(order)
-
-    def connectServer(self):
-        if self.conn: return self.conn
-        # if self.remoteServer: return self.remoteServer
-        connstr = '%s/%s@%s/%s' % (self.dNetInfo['dbusr'], self.dNetInfo['dbpwd'], self.dNetInfo['dbhost'], self.dNetInfo['dbsid'])
-        try:
-            self.conn = orcl.Connection(connstr)
-            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
-            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
-            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
-        except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
-            exit()
-        return self.conn
+        self.conn.executemanyCur(cur, order.aReqMsg)
+        cur.connection.commit()
+        # for req in order.aReqMsg:
+        #     req['REGION_CODE'] = order.dParam['REGION_CODE']
+        #     logging.debug('send:%s', req)
+        #     self.remoteServer.send(req)
+        #     self.recvResp(order)
 
 
 class CentrexClient(object):
@@ -797,12 +845,15 @@ class TableFac(FileFac):
         cur.execute(None)
         rows = cur.fetchall()
         for line in rows:
-            tmpl = KtPsTmpl(line)
+            cmd = {}
+            for i,field in enumerate(cur.description):
+                cmd[field[0]] = line[i]
+            tmpl = KtPsTmpl(cmd)
             self.aCmdTemplates.append(tmpl)
             logging.info(line)
-
-        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
         self.main.fCmd.close()
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+
 
 
 class HttpShortOrder(ReqOrder):
@@ -1188,11 +1239,11 @@ class Director(object):
                 break
             client = order.net
             i += 1
-            client.connectServer()
+            # client.connectServer()
             client.sendOrder(order)
             # client.recvResp(order)
             # client.saveResp(order)
-            client.remoteServer.close()
+            # client.remoteServer.close()
             self.saveOrderRsp(order)
         self.factory.closeDs()
         self.fRsp.close()
