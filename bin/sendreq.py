@@ -15,6 +15,7 @@
 
 import sys
 import os
+import copy
 import time
 import datetime
 import getopt
@@ -497,7 +498,7 @@ class KtPsClient(HttpShortClient):
     dSql = {}
     dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
     dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
-    dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,sysdate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
+    dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5)'
     dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
     dCur = {}
@@ -532,8 +533,14 @@ class KtPsClient(HttpShortClient):
         return True
 
     def setOrderCmd(self, order):
-        order.aReqMsg = self.aCmdTemplates
+        order.aReqMsg = copy.deepcopy(self.aCmdTemplates)
+        dtNow = datetime.datetime.now()
         for cmd in order.aReqMsg:
+            for field in cmd:
+                if field in order.dParam:
+                    cmd[field] = order.dParam[field]
+            cmd['CREATE_DATE'] = dtNow
+            # cmd['tableMonth'] = dtNow.strftime('%Y%m')
             psParam = cmd['PS_PARAM']
             for para in order.dParam:
                 pattern = r'[;^]%s=(.*?);' % para
@@ -589,7 +596,8 @@ class KtPsClient(HttpShortClient):
     def recvOrder(self, order):
         self.connectServer()
         regionCode = order.dParam['REGION_CODE']
-        month = time.strftime("%Y%m", time.localtime())
+        # month = time.strftime("%Y%m", time.localtime())
+        month = order.aReqMsg[0]['CREATE_DATE'].strftime('%Y%m')
         curName = 'RecvPs%s_%s' % (regionCode, month)
         cur = self.getCurbyName(curName)
         aPsid = order.aWaitPs
@@ -1259,9 +1267,6 @@ class Director(object):
         self.shutDown = None
         self.fRsp = None
 
-    def saveOrderRsp(self, order):
-        self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
-
     def start(self):
         self.factory.loadCmd()
         self.factory.makeNet()
@@ -1285,7 +1290,7 @@ class Director(object):
             # client.remoteServer.close()
             self.factory.saveResp(order)
         self.factory.closeDs()
-        self.fRsp.close()
+        self.factory.resp.close()
 
 
 class Main(object):
