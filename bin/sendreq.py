@@ -405,7 +405,13 @@ class KtPsTmpl(CmdTemplate):
 
 
 class KtPsOrder(ReqOrder):
-    pass
+    def __init__(self):
+        super(self.__class__, self).__init__()
+        self.aWaitPs = []
+        self.dWaitNo = {}
+
+    def getStatus(self):
+        return self.aResp
 
 
 class DbConn(object):
@@ -492,6 +498,7 @@ class KtPsClient(HttpShortClient):
     dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
     dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
     dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,sysdate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
+    dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
     dCur = {}
 
@@ -542,9 +549,16 @@ class KtPsClient(HttpShortClient):
         num = len(order.aReqMsg)
         self.conn.executeCur(cur, num)
         rows = self.conn.fetchone(cur)
+        aWaitPs = []
+        dWaitNo = {}
         for i,cmd in enumerate(order.aReqMsg):
             cmd['PS_ID'] = rows[i][0]
             cmd['DONE_CODE'] = rows[i][1]
+            waitPs = {'PS_ID': rows[i][0]}
+            aWaitPs[i] = waitPs
+            dWaitNo[rows[i][0]] = i
+        order.aWaitPs = aWaitPs
+        order.dWaitNo = dWaitNo
 
     def getRegionCode(self, order):
         # sql = self.__class__.dSql['RegionCode']
@@ -572,6 +586,27 @@ class KtPsClient(HttpShortClient):
         #     logging.debug('send:%s', req)
         #     self.remoteServer.send(req)
         #     self.recvResp(order)
+    def recvOrder(self, order):
+        self.connectServer()
+        regionCode = order.dParam['REGION_CODE']
+        month = time.strftime("%Y%m", time.localtime())
+        curName = 'RecvPs%s_%s' % (regionCode, month)
+        cur = self.getCurbyName(curName)
+        aPsid = order.aWaitPs
+        while (len(aPsid) > 0):
+            self.conn.executemanyCur(cur, aPsid)
+            rows = self.conn.fetchall(cur)
+            for row in rows:
+                psId = row[0]
+                psStatus = row[1]
+                failReason = row[2]
+                indx = order.dWaitNo[psId]
+                order.aResp[indx] = row
+                order.aWaitPs.pop(indx)
+            num = len(rows)
+            aPsid = order.aWaitPs
+            logging.info('get %d result, remain %d ps', num, len(aPsid))
+            time.sleep(30)
 
 
 class CentrexClient(object):
@@ -762,28 +797,9 @@ class FileFac(object):
             exit(2)
         return self.resp
 
-    def makeOrderFildName(self):
-        fildName = self.orderDs.readline()
-        fildName = fildName.upper()
-        self.aFildName = fildName.split()
-
-    def makeOrder(self):
-        orderClassName = '%sOrder' % self.netType
-        for line in self.orderDs:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            aParams = line.split()
-
-            order = createInstance(self.main.appNameBody, orderClassName)
-            order.setParaName(self.aFildName)
-            order.setPara(aParams)
-            # netCode = self.aNetInfo[0]['NetCode']
-            order.net = self.dNetClient[self.netCode]
-            return order
-        return None
+    def saveResp(self, order):
+        for rsp in order.aResp:
+            self.resp.write('%s %s%s' % (order.dParam['BILL_ID'], rsp, os.linesep))
 
     def loadCmd(self):
         tmpl = None
@@ -827,6 +843,29 @@ class FileFac(object):
             netCode = netInfo['NetCode']
             self.dNetClient[netCode] = net
         return self.dNetClient
+
+    def makeOrderFildName(self):
+        fildName = self.orderDs.readline()
+        fildName = fildName.upper()
+        self.aFildName = fildName.split()
+
+    def makeOrder(self):
+        orderClassName = '%sOrder' % self.netType
+        for line in self.orderDs:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            aParams = line.split()
+
+            order = createInstance(self.main.appNameBody, orderClassName)
+            order.setParaName(self.aFildName)
+            order.setPara(aParams)
+            # netCode = self.aNetInfo[0]['NetCode']
+            order.net = self.dNetClient[self.netCode]
+            return order
+        return None
 
 
 class TableFac(FileFac):
@@ -1244,7 +1283,7 @@ class Director(object):
             # client.recvResp(order)
             # client.saveResp(order)
             # client.remoteServer.close()
-            self.saveOrderRsp(order)
+            self.factory.saveResp(order)
         self.factory.closeDs()
         self.fRsp.close()
 
