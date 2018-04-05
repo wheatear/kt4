@@ -515,7 +515,7 @@ class KtPsClient(HttpShortClient):
         return self.conn
 
     def getCurbyName(self, curName):
-        if self.dCur[curName] is not None: return self.dCur[curName]
+        if curName in self.dCur: return self.dCur[curName]
         if (curName[:6] != 'SendPs') and (curName not in self.dSql):
             return None
         sql = ''
@@ -877,6 +877,9 @@ class FileFac(object):
 
 
 class TableFac(FileFac):
+    dSql = {}
+    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort'
+    dCur = {}
     def __init__(self, main):
         super(self.__class__, self).__init__(main)
         self.respName = '%s_rsp' % os.path.basename(self.main.outFile)
@@ -884,13 +887,22 @@ class TableFac(FileFac):
         self.conn = main.conn
         self.cmdTab = self.main.cmdFile
 
+    def getCurbyName(self, curName):
+        if curName in self.dCur: return self.dCur[curName]
+        if curName not in self.dSql:
+            return None
+        sql = self.dSql[curName] % self.cmdTab
+        cur = self.conn.prepareSql(sql)
+        self.dCur[curName] = cur
+        return cur
+
     def loadCmd(self):
         tmpl = None
         tmplMsg = ''
-        sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
-        cur = self.main.prepareSql(sql)
-        cur.execute(None)
-        rows = cur.fetchall()
+        # sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
+        cur = self.getCurbyName('LOADTMPL')
+        self.conn.executeCur(cur)
+        rows = self.conn.fetchall(cur)
         for line in rows:
             cmd = {}
             for i,field in enumerate(cur.description):
@@ -1387,18 +1399,24 @@ class Main(object):
             return None
         return f
 
-    def connDb(self):
-        if self.conn: return self.conn
-        try:
-            connstr = self.cfg.dbinfo['connstr']
-            self.conn = orcl.Connection(connstr)
-            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
-            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
-            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
-        except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
-            exit()
+    def connectServer(self):
+        if self.conn is not None: return self.conn
+        self.conn = DbConn(self.cfg.dbinfo)
+        self.conn.connectServer()
         return self.conn
+
+    # def connDb(self):
+    #     if self.conn: return self.conn
+    #     try:
+    #         connstr = self.cfg.dbinfo['connstr']
+    #         self.conn = orcl.Connection(connstr)
+    #         # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
+    #         # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
+    #         # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+    #     except Exception, e:
+    #         logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+    #         exit()
+    #     return self.conn
 
     def prepareSql(self, sql):
         logging.info('prepare sql: %s', sql)
@@ -1470,7 +1488,7 @@ class Main(object):
         print('logfile: %s' % self.logFile)
 
         self.cfg.loadDbinfo()
-        self.connDb()
+        self.connectServer()
         self.cfg.loadNet()
         factory = self.makeFactory()
         print('respfile: %s' % factory.respFullName)
