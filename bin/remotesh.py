@@ -9,6 +9,7 @@ import time
 import multiprocessing
 import Queue
 import signal
+import getopt
 # import cx_Oracle as orcl
 import socket
 # import hostdirs
@@ -261,12 +262,14 @@ class RemoteSh(multiprocessing.Process):
         clt.prompt()
 
 class ReShFac(object):
-    def __init__(self, main, cmdfile, dest):
+    def __init__(self, main, cmdfile):
         self.main = main
         self.cmdFile = cmdfile
-        self.dest = dest
+        self.group = main.group
+        self.hosts = main.hosts
+        # self.dest = dest
 
-    def makeCmd(self):
+    def loadCmd(self):
         logging.info('create cmd from %s', self.cmdFile)
         fCmd = self.main.openFile(self.cmdFile,'r')
         if not fCmd: return None
@@ -301,10 +304,26 @@ class ReShFac(object):
         reSh = RemoteSh(cmd, host, self.main.logPre)
         return reSh
 
-    def makeAllHosts(self):
+    def loadHosts(self):
         conn = sqlite3.connect('kthosts.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT hostname,hostip FROM kthosts')
+        if len(self.group) > 0:
+            groupName = self.group.join("','")
+            groupName = "'%s'" % groupName
+            sql = 'select hostname from grouphosts where groupname in (%s)' % groupName
+            cursor.execute(sql)
+            hostrows = cursor.fetchall()
+            for row in hostrows:
+                self.hosts.append(row[0])
+
+        sql = ''
+        if len(self.hosts) > 0:
+            hostName = self.hosts.join("','")
+            hostName = "'%s'" % hostName
+            sql = 'SELECT hostname,hostip FROM kthosts where state = 1 and hostname in (%s)' % hostName
+        else:
+            sql = 'SELECT hostname,hostip FROM kthosts where state = 1'
+        cursor.execute(sql)
         rows = cursor.fetchall()
         dHosts = {}
         for row in rows:
@@ -319,7 +338,10 @@ class ReShFac(object):
             user = row[1]
             passwd = row[2]
             prompt = row[3]
-            dHosts[hostName].setUser(user, passwd, prompt)
+            if hostName in dHosts:
+                dHosts[hostName].setUser(user, passwd, prompt)
+            else:
+                logging.warning('no host of %s', hostName)
 
         cursor.close()
         conn.close()
@@ -366,9 +388,9 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        scmd = self.factory.makeCmd()
+        scmd = self.factory.loadCmd()
         # localIp = self.factory.getLocalIp()
-        dHosts = self.factory.makeAllHosts()
+        dHosts = self.factory.loadHosts()
         localHost = socket.gethostname()
 
         i = 0
@@ -437,14 +459,24 @@ class Main(object):
             self.usage()
         # self.checkopt()
         argvs = sys.argv[1:]
-        self.cmdFile = sys.argv[1]
-        # self.caseDs = sys.argv[2]
-        # self.logFile = '%s%s' % (self.caseDs, '.log')
-        # self.resultOut = '%s%s' % (self.caseDs, '.rsp')
+
+        self.group = []
+        self.hosts = []
+        try:
+            opts, arvs = getopt.getopt(argvs, "g:h:")
+        except getopt.GetoptError, e:
+            print 'get opt error:%s. %s' % (argvs, e)
+            # self.usage()
+        for opt, arg in opts:
+             if opt == '-g':
+                self.group = arg.split(',')
+             elif opt == '-h':
+                 self.hosts = arg.split(',')
+        self.cmdFile = arvs[0]
 
     def usage(self):
-        print "Usage: %s cmdfile" % self.baseName
-        print "example:   %s %s" % (self.baseName,'mkdir.sh')
+        print "Usage: %s [-g group] [-h host] cmdfile" % self.baseName
+        print "example:   %s %s" % (self.baseName,' -g ktgroup mkdir.sh')
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -456,8 +488,8 @@ class Main(object):
         return f
 
     def start(self):
-        self.parseWorkEnv()
         self.checkArgv()
+        self.parseWorkEnv()
 
         self.cfg = Conf(self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
@@ -466,7 +498,7 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
-        factory = ReShFac(self, self.cmdFile, 'ALL')
+        factory = ReShFac(self, self.cmdFile)
         # remoteShell.loger = loger
         director = Director(factory)
         director.start()
