@@ -59,7 +59,7 @@ class Conf(object):
 
     def openCfg(self):
         if len(self.rows) > 0 : return self.rows
-        fCfg = self.main.openFile(self.cfgFile)
+        fCfg = self.main.openFile(self.cfgFile, 'r')
         self.rows = fCfg.readlines()
         fCfg.close()
         return self.rows
@@ -105,7 +105,7 @@ class Conf(object):
                 net[param[0]] = param[1]
             else:
                 net[param[0]] = None
-        self.removeUsed(netRows)
+        # self.removeUsed(netRows)
         logging.info('load %d net.', len(self.dNet))
         return self.dNet
 
@@ -131,9 +131,9 @@ class Conf(object):
                 self.dbinfo[param[0]] = param[1]
             else:
                 self.dbinfo[param[0]] = None
-        self.removeUsed(dbRows)
+        # self.removeUsed(dbRows)
         self.dbinfo['connstr'] = '%s/%s@%s/%s' % (self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbuser'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
+        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbusr'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
         return self.dbinfo
 
 
@@ -372,7 +372,8 @@ class CmdTemplate(object):
 
 class KtPsTmpl(CmdTemplate):
     def __init__(self, cmdTmpl):
-        super(self.__class__, self).__init(cmdTmpl)
+        # super(self.__class__, self).__init__(cmdTmpl)
+        self.cmdTmpl = cmdTmpl
         self.varExpt = r'@(.+?)@'
 
     def setMsg(self, tmpl):
@@ -473,7 +474,7 @@ class DbConn(object):
 
 class KtPsClient(HttpShortClient):
     dSql = {}
-    dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= %d)'
+    dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
     dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
     dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5)'
     dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
@@ -513,32 +514,33 @@ class KtPsClient(HttpShortClient):
         order.aReqMsg = copy.deepcopy(self.aCmdTemplates)
         dtNow = datetime.datetime.now()
         for cmd in order.aReqMsg:
-            for field in cmd:
+            for field in cmd.cmdTmpl:
                 if field in order.dParam:
-                    cmd[field] = order.dParam[field]
-            cmd['CREATE_DATE'] = dtNow
+                    cmd.cmdTmpl[field] = order.dParam[field]
+            cmd.cmdTmpl['CREATE_DATE'] = dtNow
             # cmd['tableMonth'] = dtNow.strftime('%Y%m')
-            psParam = cmd['PS_PARAM']
+            psParam = cmd.cmdTmpl['PS_PARAM']
             for para in order.dParam:
                 pattern = r'[;^]%s=(.*?);' % para
                 m = re.search(pattern, psParam)
                 if m is not None:
                     rpl = ';%s=%s;' % (para, order.dParam[para])
-                    cmd['PS_PARAM'] = psParam.replace(m.group(), rpl)
+                    cmd.cmdTmpl['PS_PARAM'] = psParam.replace(m.group(), rpl)
 
     def getOrderId(self, order):
         # sql = self.__class__.dSql['OrderId']
         cur = self.getCurbyName('OrderId')
-        dPara = {'rownum':1}
+        dPara = {'PSNUM':len(order.aReqMsg)}
         num = len(order.aReqMsg)
-        self.conn.executeCur(cur, num)
-        rows = self.conn.fetchone(cur)
-        aWaitPs = []
+        self.conn.executeCur(cur, dPara)
+        rows = self.conn.fetchall(cur)
+        aWaitPs = [None] * len(order.aReqMsg)
         dWaitNo = {}
         for i,cmd in enumerate(order.aReqMsg):
-            cmd['PS_ID'] = rows[i][0]
-            cmd['DONE_CODE'] = rows[i][1]
+            cmd.cmdTmpl['PS_ID'] = rows[i][0]
+            cmd.cmdTmpl['DONE_CODE'] = rows[i][1]
             waitPs = {'PS_ID': rows[i][0]}
+            logging.debug('psid: %d %d', rows[i][0], i)
             aWaitPs[i] = waitPs
             dWaitNo[rows[i][0]] = i
         order.aWaitPs = aWaitPs
@@ -553,7 +555,7 @@ class KtPsClient(HttpShortClient):
         row = self.conn.fetchone(cur)
         order.dParam['REGION_CODE'] = row[0]
         for req in order.aReqMsg:
-            req['REGION_CODE'] = order.dParam['REGION_CODE']
+            req.cmdTmpl['REGION_CODE'] = order.dParam['REGION_CODE']
 
     def sendOrder(self, order):
         self.connectServer()
@@ -562,8 +564,11 @@ class KtPsClient(HttpShortClient):
         self.getRegionCode(order)
         curName = 'SendPs%s' % order.dParam['REGION_CODE']
         cur = self.getCurbyName(curName)
-        # logging.debug(order.httpRequest)
-        self.conn.executemanyCur(cur, order.aReqMsg)
+        # logging.debug(order.aReqMsg)
+        aParam = []
+        for req in order.aReqMsg:
+            aParam.append(req.cmdTmpl)
+        self.conn.executemanyCur(cur, aParam)
         cur.connection.commit()
         # for req in order.aReqMsg:
         #     req['REGION_CODE'] = order.dParam['REGION_CODE']
@@ -610,6 +615,7 @@ class FileFac(object):
 
     def openDs(self):
         if self.orderDs: return self.orderDs
+        logging.info('open ds %s', self.orderDsName)
         self.orderDs = self.main.openFile(self.orderDsName, 'r')
         if self.orderDs is None:
             logging.fatal('Can not open orderDs file %s.', self.orderDsName)
@@ -668,7 +674,7 @@ class FileFac(object):
         for netInfo in self.aNetInfo:
             # print netInfo
             net = createInstance(self.main.appNameBody, netClassName, netInfo)
-            net.aCmdTemplates= self.aCmdTemplates
+            net.aCmdTemplates = self.aCmdTemplates
             net.prepareTmpl()
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
@@ -678,6 +684,7 @@ class FileFac(object):
 
     def makeOrderFildName(self):
         fildName = self.orderDs.readline()
+        logging.info('field: %s', fildName)
         fildName = fildName.upper()
         self.aFildName = fildName.split()
 
@@ -685,6 +692,7 @@ class FileFac(object):
         orderClassName = '%sOrder' % self.netType
         for line in self.orderDs:
             line = line.strip()
+            logging.debug(line)
             if len(line) == 0:
                 continue
             if line[0] == '#':
@@ -694,6 +702,7 @@ class FileFac(object):
             order = createInstance(self.main.appNameBody, orderClassName)
             order.setParaName(self.aFildName)
             order.setPara(aParams)
+            logging.debug(order.dParam)
             # netCode = self.aNetInfo[0]['NetCode']
             order.net = self.dNetClient[self.netCode]
             return order
@@ -733,8 +742,9 @@ class TableFac(FileFac):
                 cmd[field[0]] = line[i]
             tmpl = KtPsTmpl(cmd)
             self.aCmdTemplates.append(tmpl)
-            logging.info(line)
-        self.main.fCmd.close()
+            # logging.info(line)
+            logging.info(cmd)
+        cur.close()
         logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
 
 
@@ -763,9 +773,11 @@ class Director(object):
             if order is None:
                 logging.info('load all orders,')
                 break
+            # logging.debug(order.dParam)
             client = order.net
             i += 1
             # client.connectServer()
+            logging.info('send order:')
             client.sendOrder(order)
             # client.recvResp(order)
             # client.saveResp(order)
@@ -773,6 +785,7 @@ class Director(object):
             self.factory.saveResp(order)
         self.factory.closeDs()
         self.factory.resp.close()
+        logging.info('all order completed.')
 
 
 class Main(object):
@@ -827,7 +840,7 @@ class Main(object):
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
-        logging.info('outfile: %s', self.outFile)
+        # logging.info('outfile: %s', self.outFile)
 
     def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -950,7 +963,7 @@ class Main(object):
         self.checkArgv()
         self.parseWorkEnv()
 
-        self.cfg = Conf(self.cfgFile)
+        self.cfg = Conf(main, self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
