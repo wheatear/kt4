@@ -308,21 +308,24 @@ class ReShFac(object):
         conn = sqlite3.connect('kthosts.db')
         cursor = conn.cursor()
         if len(self.group) > 0:
-            groupName = self.group.join("','")
+            groupName = "','".join(self.group)
             groupName = "'%s'" % groupName
             sql = 'select hostname from grouphosts where groupname in (%s)' % groupName
             cursor.execute(sql)
             hostrows = cursor.fetchall()
             for row in hostrows:
                 self.hosts.append(row[0])
+            logging.info('group hosts: %s', self.hosts)
 
         sql = ''
+        hostName = None
         if len(self.hosts) > 0:
-            hostName = self.hosts.join("','")
+            hostName = "','".join(self.hosts)
             hostName = "'%s'" % hostName
             sql = 'SELECT hostname,hostip FROM kthosts where state = 1 and hostname in (%s)' % hostName
         else:
             sql = 'SELECT hostname,hostip FROM kthosts where state = 1'
+        logging.info('load host sql: %s', sql)
         cursor.execute(sql)
         rows = cursor.fetchall()
         dHosts = {}
@@ -330,7 +333,11 @@ class ReShFac(object):
             host = ReHost(*row)
             dHosts[row[0]] = host
         # cursor.close()
-        userSql = 'select hostname,user,passwd,prompt from hostuser'
+        logging.info('host: %s', dHosts.keys())
+        if hostName:
+            userSql = 'select hostname,user,passwd,prompt from hostuser where hostname in (%s)' % hostName
+        else:
+            userSql = 'select hostname,user,passwd,prompt from hostuser'
         cursor.execute(userSql)
         rows = cursor.fetchall()
         for row in rows:
@@ -338,6 +345,7 @@ class ReShFac(object):
             user = row[1]
             passwd = row[2]
             prompt = row[3]
+            # logging.debug(row)
             if hostName in dHosts:
                 dHosts[hostName].setUser(user, passwd, prompt)
             else:
