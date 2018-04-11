@@ -16,6 +16,7 @@ from socket import *
 import BaseHTTPServer
 import urllib
 import json
+import base64
 import SocketServer
 
 
@@ -303,7 +304,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         json_data = self._json_encode(data)
         file_name = json_data['FileName']
         file_data = base64.b64decode(json_data['FileData'])
-        file_path = "%s/%s" % (CONIFRM_PATH, file_name)
+        file_path = "%s/%s" % ('/tmp', file_name)
         fd = open(file_path, 'w')
         fd.write(file_data)
         fd.close()
@@ -389,13 +390,13 @@ class VirNetFac(object):
                 continue
 
 
-    def makeServer(self):
+    def makeServer(self, handler):
         host = ''
-        addr = (host, self.servInfo['PORT'])
+        addr = (host, int(self.servInfo['PORT']))
         if self.servInfo['SERV'] == 'SOCKET':
-            neServer = SocketServer.ThreadingTCPServer(ADDR, NeHander)
+            neServer = SocketServer.ThreadingTCPServer(addr, handler)
         elif self.servInfo['SERV'] == 'HTTP':
-            neServer = BaseHTTPServer.HTTPServer(ADDR, NeHander)
+            neServer = BaseHTTPServer.HTTPServer(addr, handler)
         return neServer
 
 
