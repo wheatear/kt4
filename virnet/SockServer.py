@@ -34,7 +34,7 @@ loginRspBodyFmt = '<12sB'
 cmdBodyFmt = '<%ds'
 cmdRspBodyFmt = '<B'
 
-class NeHander(SocketServer.StreamRequestHandler):
+class MsHander(SocketServer.StreamRequestHandler):
     def handle(self):
         self.login()
         self.doCmd()
