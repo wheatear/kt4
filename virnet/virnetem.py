@@ -283,6 +283,10 @@ class Director(object):
 
 
 class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    def __init__(self, respInfo):
+        super(self.__class__, self).__init__()
+        self.respInfo = respInfo
+        
     def _set_headers(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
@@ -336,6 +340,7 @@ class VirNetFac(object):
         self.netFile = netfile
         self.rows = []
         self.servInfo = {}
+        self.respHead = {}
         self.respInfo = {}
 
     def readNet(self):
@@ -345,6 +350,7 @@ class VirNetFac(object):
 
     def readNetInfo(self):
         section  = None
+        respHeadKey = None
         for i in range(len(self.rows)):
             row = self.rows[i]
             row = row.strip()
@@ -375,8 +381,12 @@ class VirNetFac(object):
             if section == 'request command':
                 pass
             if section == 'response head':
-                i += 1
-                self.respInfo[row] = self.rows[i]
+                aRow = row.split()
+                if aRow[0] == 'HEAD_KEY':
+                    self.respHead[row] = {}
+                    respHeadKey = row
+                else:
+                    self.respHead[respHeadKey][aRow[0]] = aRow[1]
                 continue
             if section == 'response body':
                 i += 1
@@ -388,7 +398,6 @@ class VirNetFac(object):
                     logging.error('error request response map info: %s', row)
                 self.respInfo[aRow[0]] = aRow[1:]
                 continue
-
 
     def makeServer(self, handler):
         host = ''
