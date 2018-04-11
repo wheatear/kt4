@@ -13,28 +13,29 @@ import struct
 import logging
 import multiprocessing
 from socket import *
+import BaseHTTPServer
+import urllib
+import json
 import SocketServer
 
 
-HOST = ''
-PORT = 8787
-ADDR = (HOST,PORT)
+# HOST = ''
+# PORT = 8787
+# ADDR = (HOST,PORT)
 
 
+class MsHander(SocketServer.StreamRequestHandler):
+    loginFmt = '<3IH12s12s'
+    loginRspFmt = '<3IH12sB'
+    cmdFmt = '<3IH%ds'
+    cmdRspFmt = '<3IHB'
 
-loginFmt = '<3IH12s12s'
-loginRspFmt = '<3IH12sB'
-cmdFmt = '<3IH%ds'
-cmdRspFmt = '<3IHB'
+    headFmt = '<3IH'
 
-headFmt = '<3IH'
-
-loginBodyFmt = '<12s12s'
-loginRspBodyFmt = '<12sB'
-cmdBodyFmt = '<%ds'
-cmdRspBodyFmt = '<B'
-
-class NeHander(SocketServer.StreamRequestHandler):
+    loginBodyFmt = '<12s12s'
+    loginRspBodyFmt = '<12sB'
+    cmdBodyFmt = '<%ds'
+    cmdRspBodyFmt = '<B'
     def handle(self):
         self.login()
         self.doCmd()
@@ -47,13 +48,13 @@ class NeHander(SocketServer.StreamRequestHandler):
         print 'login:%s' % repr(buff)
         reqLen = len(buff)
         print 'login package length:%d ' % reqLen
-        fLength, fMsgType, fSquence, fClientId, fUser, fPasswd = struct.unpack(loginFmt, buff)
+        fLength, fMsgType, fSquence, fClientId, fUser, fPasswd = struct.unpack(self.loginFmt, buff)
         print 'login:%d %d %d %d %s %s' % (fLength, fMsgType, fSquence, fClientId, fUser, fPasswd)
         loginStatus = 0
         fSquence = 1
         fClientId = 2
         fRspLength = 27
-        buffRsp = struct.pack(loginRspFmt, fRspLength, fMsgType, fSquence, fClientId, fUser, loginStatus)
+        buffRsp = struct.pack(self.loginRspFmt, fRspLength, fMsgType, fSquence, fClientId, fUser, loginStatus)
         print 'login resp:%d %d %d %d %s %d' % (fRspLength, fMsgType, fSquence, fClientId, fUser, loginStatus)
         print 'login resp:%s' % repr(buffRsp)
         self.request.sendall(buffRsp)
@@ -61,15 +62,15 @@ class NeHander(SocketServer.StreamRequestHandler):
     def doCmd(self):
         buff = self.request.recv(14)
         print 'cmd head:%s' % repr(buff)
-        fLength, fMsgType, fSquence, fClientId = struct.unpack(headFmt, buff)
+        fLength, fMsgType, fSquence, fClientId = struct.unpack(self.headFmt, buff)
         print 'cmd head:%d %d %d %d' % (fLength, fMsgType, fSquence, fClientId)
         cmdLengtgh = fLength - 14
-        cmdFmt = cmdBodyFmt % cmdLengtgh
+        cmdFmt = self.cmdBodyFmt % cmdLengtgh
         buff = self.request.recv(cmdLengtgh)
         print 'cmd:%s' % repr(buff)
         cmd = struct.unpack(cmdFmt, buff)
         print 'request:%d %d %d %d %s' % (fLength, fMsgType, fSquence, fClientId, cmd)
-        rspBuff = struct.pack(cmdRspFmt, 15, fMsgType, fSquence, fClientId, 0)
+        rspBuff = struct.pack(self.cmdRspFmt, 15, fMsgType, fSquence, fClientId, 0)
         print 'response:%d %d %d %d %d' % (15, fMsgType, fSquence, fClientId, 0)
         print 'cmd resp:%s' % repr(rspBuff)
         self.request.sendall(rspBuff)
@@ -77,9 +78,9 @@ class NeHander(SocketServer.StreamRequestHandler):
     def logout(self):
         buff = self.request.recv(14)
         print 'logout:%s' % repr(buff)
-        fLength, fMsgType, fSquence, fClientId = struct.unpack(headFmt, buff)
+        fLength, fMsgType, fSquence, fClientId = struct.unpack(self.headFmt, buff)
         print 'request:%d %d %d %d' % (fLength, fMsgType, fSquence, fClientId)
-        rspBuff = struct.pack(cmdRspFmt, 15, fMsgType, fSquence, fClientId, 0)
+        rspBuff = struct.pack(self.cmdRspFmt, 15, fMsgType, fSquence, fClientId, 0)
         print 'response:%d %d %d %d %d' % (15, fMsgType, fSquence, fClientId, 0)
         print 'logout resp:%s' % repr(rspBuff)
         self.request.sendall(rspBuff)
@@ -280,15 +281,134 @@ class Director(object):
     pass
 
 
+class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    def _set_headers(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def _json_encode(self, data):
+        array = data.split('&')
+        json_data = {}
+        for item in array:
+            item = item.split('=', 1)
+            json_data[item[0]] = item[1]
+        return json_data
+
+    def _get_handler(self, data):
+        json_data = self._json_encode(data)
+
+    def _post_handler(self, data):
+        retVal = {}
+        json_data = self._json_encode(data)
+        file_name = json_data['FileName']
+        file_data = base64.b64decode(json_data['FileData'])
+        file_path = "%s/%s" % (CONIFRM_PATH, file_name)
+        fd = open(file_path, 'w')
+        fd.write(file_data)
+        fd.close()
+        retVal["RetCode"] = 0
+        return json.dumps(retVal)
+
+    def do_HEAD(self):
+        self._set_headers()
+
+    def do_GET(self):
+        self._set_headers()
+        # get request params
+        path = self.path
+        query = urllib.splitquery(path)
+        self._get_handler(query[1]);
+
+    def do_POST(self):
+        self._set_headers()
+        # get post data
+        post_data = self.rfile.read(int(self.headers['content-length']))
+        post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
+        retStr = self._post_handler(post_data)
+        self.wfile.write(retStr)
+        
+
+class VirNetFac(object):
+    def __init__(self, main, netfile):
+        self.main = main
+        self.netFile = netfile
+        self.rows = []
+        self.servInfo = {}
+        self.respInfo = {}
+
+    def readNet(self):
+        fNet = self.main.openFile(self.netFile)
+        self.rows = fNet.readlines()
+        fNet.close()
+
+    def readNetInfo(self):
+        section  = None
+        for i in range(len(self.rows)):
+            row = self.rows[i]
+            row = row.strip()
+            if len(row) < 1:
+                # section = None
+                continue
+            if row == '#service_port':
+                section = 'service_port'
+                continue
+            elif row == '#request command':
+                section = 'request command'
+                continue
+            elif row == '#response head':
+                section = 'response head'
+                continue
+            elif row == '#response body':
+                section = 'response body'
+                continue
+            elif row == '#mapping of request and response':
+                section = 'mapping of request and response'
+                continue
+            if section == 'service_port':
+                aRow = row.split()
+                if len(aRow) < 2:
+                    logging.error('error server info: %s', row)
+                self.servInfo[aRow[0]] = aRow[1]
+                continue
+            if section == 'request command':
+                pass
+            if section == 'response head':
+                i += 1
+                self.respInfo[row] = self.rows[i]
+                continue
+            if section == 'response body':
+                i += 1
+                self.respInfo[row] = self.rows[i]
+                continue
+            if section == 'mapping of request and response':
+                aRow = row.split()
+                if len(aRow) < 2:
+                    logging.error('error request response map info: %s', row)
+                self.respInfo[aRow[0]] = aRow[1:]
+                continue
+
+
+    def makeServer(self):
+        host = ''
+        addr = (host, self.servInfo['PORT'])
+        if self.servInfo['SERV'] == 'SOCKET':
+            neServer = SocketServer.ThreadingTCPServer(ADDR, NeHander)
+        elif self.servInfo['SERV'] == 'HTTP':
+            neServer = BaseHTTPServer.HTTPServer(ADDR, NeHander)
+        return neServer
+
+
+    def makeHandler(self):
+        pass
+
+
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
-        self.fCmd = None
-        self.caseDs = None
-        self.netType = None
-        self.netCode = None
-        self.conn = None
+        self.fNet = None
+        self.netFile = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -325,45 +445,24 @@ class Main(object):
         # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
         self.today = time.strftime("%Y%m%d", time.localtime())
         cfgName = '%s.cfg' % self.appNameBody
-        logName = '%s_%s.log' % (self.appNameBody, self.today)
-        logNamePre = '%s_%s' % (self.appNameBody, self.today)
+        logName = '%s_%s.log' % (self.netFile, self.today)
+        logNamePre = '%s_%s' % (self.netFile, self.today)
         outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
-        # logging.info('outfile: %s', self.outFile)
 
     def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
         self.appName = appName
-        if self.argc < 3:
+        if self.argc < 2:
             self.usage()
-        # self.checkopt()
-        argvs = sys.argv[1:]
-        self.facType = 'f'
-        try:
-            opts, arvs = getopt.getopt(argvs, "t:")
-        except getopt.GetoptError, e:
-            orderMode = 't'
-            print 'get opt error:%s. %s' % (argvs,e)
-            # self.usage()
-        for opt, arg in opts:
-            # print 'opt: %s' % opt
-            if opt == '-t':
-                self.facType = 't'
-                self.cmdFile = arg
-        if self.facType == 'f':
-            self.cmdFile = arvs[0]
-            self.dsIn = arvs[1]
-        else:
-            self.dsIn = arvs[0]
-        # self.logFile = '%s%s' % (self.dsIn, '.log')
-        # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
+        self.netFile = sys.argv[1]
 
     def usage(self):
-        print "Usage: %s [-t] cmdfile datafile" % self.appName
-        print "example:   %s %s" % (self.appName,'creatUser teldata')
+        print "Usage: %s netcfg" % self.appName
+        print "example:   %s %s" % (self.appName,'hsshwcfg')
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -471,9 +570,9 @@ class Main(object):
         director.start()
 
 
-neServer = SocketServer.ThreadingTCPServer(ADDR, NeHander)
-print 'waiting for connection...'
-neServer.serve_forever()
+# neServer = SocketServer.ThreadingTCPServer(ADDR, NeHander)
+# print 'waiting for connection...'
+# neServer.serve_forever()
 
 def createInstance(module_name, class_name, *args, **kwargs):
     module_meta = __import__(module_name, globals(), locals(), [class_name])
