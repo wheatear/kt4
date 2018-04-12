@@ -286,7 +286,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def __init__(self, respInfo):
         super(self.__class__, self).__init__()
         self.respInfo = respInfo
-        
+
     def _set_headers(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
