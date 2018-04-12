@@ -284,12 +284,8 @@ class Director(object):
 
 class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     # pattCmdReq = r'<soapenv:Body>\W*<hss:(\w+)>'
-    def __init__(self, respInfo):
-        super(self.__class__, self).__init__()
-        self.respInfo = respInfo
-
     def _set_headers(self, headKey):
-        dHeader = self.respHead[headKey]
+        dHeader = self.server.respHead[headKey]
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
@@ -331,7 +327,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         # get post data
         post_data = self.rfile.read(int(self.headers['content-length']))
         post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
-        aPtCmd = self.respInfo.servInfo['PCMD']
+        aPtCmd = self.server.servInfo['PCMD']
         for pt in aPtCmd:
             m = re.search(pt, post_data)
             if m: break
@@ -357,7 +353,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.end_headers()
 
     def makeHeader(self, reqCmd):
-        dHeader = self.respInfo.respHead[reqCmd]
+        dHeader = self.server.respHead[reqCmd]
         for headerKey in dHeader:
             if headerKey == 'Location':
                 value = dHeader[headerKey] % self.client_address
@@ -365,24 +361,24 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         return dHeader
 
     def makeRspBody(self, reqData, reqCmd):
-        aRsp = self.respInfo.respMap[reqCmd]
+        aRsp = self.server.respMap[reqCmd]
         bodyKey = None
         if len(aRsp) > 1:
             bodyKey = aRsp[1]
         else:
             return None
-        if bodyKey in self.respInfo.respBody:
-            rspBody = self.respInfo.respBody[bodyKey]
+        if bodyKey in self.server.respBody:
+            rspBody = self.server.respBody[bodyKey]
         else:
             return None
-        aPattIsdnReq = self.respInfo.servInfo['PISDNREQ']
+        aPattIsdnReq = self.server.servInfo['PISDNREQ']
         isdn = self.getValue(aPattIsdnReq, reqData)
-        aPattIsdnRsp = self.respInfo.servInfo['PISDNRSP']
+        aPattIsdnRsp = self.server.servInfo['PISDNRSP']
         if isdn:
             rspBody = self.subValue(aPattIsdnRsp,isdn, rspBody)
-        aPattImsiReq = self.respInfo.servInfo['PIMSIREQ']
+        aPattImsiReq = self.server.servInfo['PIMSIREQ']
         imsi = self.getValue(aPattImsiReq, reqData)
-        aPattImsiRsp = self.respInfo.servInfo['PIMSIRSP']
+        aPattImsiRsp = self.server.servInfo['PIMSIRSP']
         if imsi:
             rspBody = self.subValue(aPattImsiRsp, imsi, rspBody)
         return rspBody
@@ -415,7 +411,7 @@ class VirNetFac(object):
         self.respMap = {}
 
     def readNet(self):
-        fNet = self.main.openFile(self.netFile)
+        fNet = self.main.openFile(self.netFile, 'r')
         self.rows = fNet.readlines()
         fNet.close()
 
@@ -457,7 +453,7 @@ class VirNetFac(object):
             if section == 'request command':
                 pass
             if section == 'response head':
-                aRow = row.split()
+                aRow = row.split(': ')
                 if aRow[0] == 'HEAD_KEY':
                     self.respHead[row] = {}
                     respHeadKey = row
@@ -474,6 +470,7 @@ class VirNetFac(object):
                     logging.error('error request response map info: %s', row)
                 self.respMap[aRow[0]] = aRow[1:]
                 continue
+        logging.info(self.servInfo)
 
     def makeServer(self):
         host = ''
@@ -483,6 +480,10 @@ class VirNetFac(object):
             neServer = SocketServer.ThreadingTCPServer(addr, MsHander)
         elif serverType == 'HTTP':
             neServer = BaseHTTPServer.HTTPServer(addr, HttpHandler)
+        neServer.servInfo = self.servInfo
+        neServer.respHead = self.respHead
+        neServer.respBody = self.respBody
+        neServer.respMap = self.respMap
         return neServer
 
 
@@ -652,7 +653,9 @@ class Main(object):
         # self.cfg.loadDbinfo()
         # self.connectServer()
         # self.cfg.loadNet()
-        factory = self.VirNetFac()
+        factory = VirNetFac(self, self.netFile)
+        factory.readNet()
+        factory.readNetInfo()
         server = factory.makeServer()
         server.serve_forever()
 
