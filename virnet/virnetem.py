@@ -283,11 +283,13 @@ class Director(object):
 
 
 class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    # pattCmdReq = r'<soapenv:Body>\W*<hss:(\w+)>'
     def __init__(self, respInfo):
         super(self.__class__, self).__init__()
         self.respInfo = respInfo
 
-    def _set_headers(self):
+    def _set_headers(self, headKey):
+        dHeader = self.respHead[headKey]
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
@@ -326,12 +328,80 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self._get_handler(query[1]);
 
     def do_POST(self):
-        self._set_headers()
         # get post data
         post_data = self.rfile.read(int(self.headers['content-length']))
         post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
-        retStr = self._post_handler(post_data)
-        self.wfile.write(retStr)
+        aPtCmd = self.respInfo.servInfo['PCMD']
+        for pt in aPtCmd:
+            m = re.search(pt, post_data)
+            if m: break
+        reqCmd = None
+        if m:
+            reqCmd = m.group(1)
+        else:
+            self.send_error(400, 'no find request cmd')
+            return reqCmd
+        rspHeader = self.makeHeader(reqCmd)
+        rspBody = self.makeRspBody(post_data, reqCmd)
+        rspHeader['Content-Length'] = '%d' % len(rspBody)
+        self.sendHeader(rspHeader)
+        # self._set_headers(reqCmd)
+        # retStr = self._post_handler(post_data, reqCmd)
+        self.wfile.write(rspBody)
+
+    def sendHeader(self, dHeader):
+        rspCode = dHeader.pop('Resp-Code')
+        self.send_response(rspCode)
+        for key in dHeader:
+            self.send_header(key, dHeader[key])
+        self.end_headers()
+
+    def makeHeader(self, reqCmd):
+        dHeader = self.respInfo.respHead[reqCmd]
+        for headerKey in dHeader:
+            if headerKey == 'Location':
+                value = dHeader[headerKey] % self.client_address
+                dHeader[headerKey] = value
+        return dHeader
+
+    def makeRspBody(self, reqData, reqCmd):
+        aRsp = self.respInfo.respMap[reqCmd]
+        bodyKey = None
+        if len(aRsp) > 1:
+            bodyKey = aRsp[1]
+        else:
+            return None
+        if bodyKey in self.respInfo.respBody:
+            rspBody = self.respInfo.respBody[bodyKey]
+        else:
+            return None
+        aPattIsdnReq = self.respInfo.servInfo['PISDNREQ']
+        isdn = self.getValue(aPattIsdnReq, reqData)
+        aPattIsdnRsp = self.respInfo.servInfo['PISDNRSP']
+        if isdn:
+            rspBody = self.subValue(aPattIsdnRsp,isdn, rspBody)
+        aPattImsiReq = self.respInfo.servInfo['PIMSIREQ']
+        imsi = self.getValue(aPattImsiReq, reqData)
+        aPattImsiRsp = self.respInfo.servInfo['PIMSIRSP']
+        if imsi:
+            rspBody = self.subValue(aPattImsiRsp, imsi, rspBody)
+        return rspBody
+
+    def subValue(self, aPatt, val, data):
+        for pt in aPatt:
+            ptValue = pt.replace('(\d+)', val)
+            rspValue = re.subn(pt, ptValue, data)
+            if rspValue[1] > 0:
+                return rspValue[0]
+        return data
+
+    def getValue(self, aPatt, data):
+        m = None
+        for pt in aPatt:
+            m = re.search(pt, data)
+            if m: return m.group(1)
+        return m
+
         
 
 class VirNetFac(object):
@@ -341,7 +411,8 @@ class VirNetFac(object):
         self.rows = []
         self.servInfo = {}
         self.respHead = {}
-        self.respInfo = {}
+        self.respBody = {}
+        self.respMap = {}
 
     def readNet(self):
         fNet = self.main.openFile(self.netFile)
@@ -376,7 +447,12 @@ class VirNetFac(object):
                 aRow = row.split()
                 if len(aRow) < 2:
                     logging.error('error server info: %s', row)
-                self.servInfo[aRow[0]] = aRow[1]
+                else:
+                    if aRow[0] in self.servInfo:
+                        self.servInfo[aRow[0]].append(aRow[1])
+                    else:
+                        self.servInfo[aRow[0]] = []
+                        self.servInfo[aRow[0]].append(aRow[1])
                 continue
             if section == 'request command':
                 pass
@@ -390,22 +466,23 @@ class VirNetFac(object):
                 continue
             if section == 'response body':
                 i += 1
-                self.respInfo[row] = self.rows[i]
+                self.respBody[row] = self.rows[i]
                 continue
             if section == 'mapping of request and response':
                 aRow = row.split()
                 if len(aRow) < 2:
                     logging.error('error request response map info: %s', row)
-                self.respInfo[aRow[0]] = aRow[1:]
+                self.respMap[aRow[0]] = aRow[1:]
                 continue
 
-    def makeServer(self, handler):
+    def makeServer(self):
         host = ''
-        addr = (host, int(self.servInfo['PORT']))
-        if self.servInfo['SERV'] == 'SOCKET':
-            neServer = SocketServer.ThreadingTCPServer(addr, handler)
-        elif self.servInfo['SERV'] == 'HTTP':
-            neServer = BaseHTTPServer.HTTPServer(addr, handler)
+        addr = (host, int(self.servInfo['PORT'][0]))
+        serverType = self.servInfo['SERV'][0]
+        if serverType == 'SOCKET':
+            neServer = SocketServer.ThreadingTCPServer(addr, MsHander)
+        elif serverType == 'HTTP':
+            neServer = BaseHTTPServer.HTTPServer(addr, HttpHandler)
         return neServer
 
 
@@ -457,11 +534,11 @@ class Main(object):
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.netFile, self.today)
         logNamePre = '%s_%s' % (self.netFile, self.today)
-        outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
+        # outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
-        self.outFile = os.path.join(self.dirOutput, outFileName)
+        # self.outFile = os.path.join(self.dirOutput, outFileName)
 
     def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -564,20 +641,21 @@ class Main(object):
         self.checkArgv()
         self.parseWorkEnv()
 
-        self.cfg = Conf(main, self.cfgFile)
-        self.logLevel = self.cfg.loadLogLevel()
+        # self.cfg = Conf(main, self.cfgFile)
+        # self.logLevel = self.cfg.loadLogLevel()
+        self.logLevel = logging.DEBUG
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
 
-        self.cfg.loadDbinfo()
-        self.connectServer()
-        self.cfg.loadNet()
-        factory = self.makeFactory()
-        print('respfile: %s' % factory.respFullName)
-        director = Director(factory)
-        director.start()
+        # self.cfg.loadDbinfo()
+        # self.connectServer()
+        # self.cfg.loadNet()
+        factory = self.VirNetFac()
+        server = factory.makeServer()
+        server.serve_forever()
+
 
 
 # neServer = SocketServer.ThreadingTCPServer(ADDR, NeHander)
