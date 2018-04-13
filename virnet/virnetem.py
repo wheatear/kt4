@@ -6,6 +6,7 @@ import sys
 import os
 import time
 import getopt
+import copy
 import random
 import re
 import signal
@@ -199,83 +200,83 @@ class Conf(object):
         return self.dbinfo
 
 
-class DbConn(object):
-    def __init__(self, dbInfo):
-        self.dbInfo = dbInfo
-        self.conn = None
-        # self.connectServer()
-
-    def connectServer(self):
-        if self.conn: return self.conn
-        # if self.remoteServer: return self.remoteServer
-        connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
-        try:
-            self.conn = orcl.Connection(connstr)
-            # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
-            # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
-            # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
-        except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
-            exit()
-        return self.conn
-
-    def prepareSql(self, sql):
-        logging.info('prepare sql: %s', sql)
-        cur = self.conn.cursor()
-        try:
-            cur.prepare(sql)
-        except orcl.DatabaseError, e:
-            logging.error('prepare sql err: %s', sql)
-            return None
-        return cur
-
-    def executemanyCur(self, cur, params):
-        logging.info('execute cur %s', cur.statement)
-        try:
-            cur.executemany(None, params)
-        except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
-            return None
-        return cur
-
-    def fetchmany(self, cur):
-        logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
-        try:
-            rows = cur.fetchmany()
-        except orcl.DatabaseError, e:
-            logging.error('fetch sql err %s:%s ', e, cur.statement)
-            return None
-        return rows
-
-    def fetchone(self, cur):
-        logging.debug('fethone from %s', cur.statement)
-        try:
-            row = cur.fetchone()
-        except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
-            return None
-        return row
-
-    def fetchall(self, cur):
-        logging.debug('fethone from %s', cur.statement)
-        try:
-            rows = cur.fetchall()
-        except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
-            return None
-        return rows
-
-    def executeCur(self, cur, params=None):
-        logging.info('execute cur %s', cur.statement)
-        try:
-            if params is None:
-                cur.execute(None)
-            else:
-                cur.execute(None, params)
-        except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
-            return None
-        return cur
+# class DbConn(object):
+#     def __init__(self, dbInfo):
+#         self.dbInfo = dbInfo
+#         self.conn = None
+#         # self.connectServer()
+#
+#     def connectServer(self):
+#         if self.conn: return self.conn
+#         # if self.remoteServer: return self.remoteServer
+#         connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
+#         try:
+#             self.conn = orcl.Connection(connstr)
+#             # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
+#             # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
+#             # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+#         except Exception, e:
+#             logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+#             exit()
+#         return self.conn
+#
+#     def prepareSql(self, sql):
+#         logging.info('prepare sql: %s', sql)
+#         cur = self.conn.cursor()
+#         try:
+#             cur.prepare(sql)
+#         except orcl.DatabaseError, e:
+#             logging.error('prepare sql err: %s', sql)
+#             return None
+#         return cur
+#
+#     def executemanyCur(self, cur, params):
+#         logging.info('execute cur %s', cur.statement)
+#         try:
+#             cur.executemany(None, params)
+#         except orcl.DatabaseError, e:
+#             logging.error('execute sql err %s:%s ', e, cur.statement)
+#             return None
+#         return cur
+#
+#     def fetchmany(self, cur):
+#         logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
+#         try:
+#             rows = cur.fetchmany()
+#         except orcl.DatabaseError, e:
+#             logging.error('fetch sql err %s:%s ', e, cur.statement)
+#             return None
+#         return rows
+#
+#     def fetchone(self, cur):
+#         logging.debug('fethone from %s', cur.statement)
+#         try:
+#             row = cur.fetchone()
+#         except orcl.DatabaseError, e:
+#             logging.error('execute sql err %s:%s ', e, cur.statement)
+#             return None
+#         return row
+#
+#     def fetchall(self, cur):
+#         logging.debug('fethone from %s', cur.statement)
+#         try:
+#             rows = cur.fetchall()
+#         except orcl.DatabaseError, e:
+#             logging.error('execute sql err %s:%s ', e, cur.statement)
+#             return None
+#         return rows
+#
+#     def executeCur(self, cur, params=None):
+#         logging.info('execute cur %s', cur.statement)
+#         try:
+#             if params is None:
+#                 cur.execute(None)
+#             else:
+#                 cur.execute(None, params)
+#         except orcl.DatabaseError, e:
+#             logging.error('execute sql err %s:%s ', e, cur.statement)
+#             return None
+#         return cur
 
 
 class Director(object):
@@ -326,9 +327,14 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_POST(self):
         # get post data
         post_data = self.rfile.read(int(self.headers['content-length']))
-        post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
+        # post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
+        logging.debug('get request from %s %s %d %s', self.client_address, self.request_version, self.close_connection, self.version_string())
+        logging.debug(post_data)
         aPtCmd = self.server.servInfo['PCMD']
         for pt in aPtCmd:
+            pt = eval(pt)
+            logging.debug('cmd pattern: %s', pt)
+            # pt = ':Body>\s*<m:(\w+?)[\s>]'
             m = re.search(pt, post_data)
             if m: break
         reqCmd = None
@@ -337,39 +343,91 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         else:
             self.send_error(400, 'no find request cmd')
             return reqCmd
+        logging.debug('get request cmd: %s', reqCmd)
         rspHeader = self.makeHeader(reqCmd)
         rspBody = self.makeRspBody(post_data, reqCmd)
+        if not rspHeader:
+            self.send_error(400)
+            return
+        if not rspBody:
+            rspHeader['Content-Length'] = '%d' % 0
+            logging.debug(rspHeader)
+            self.sendHeader(rspHeader)
+            return
         rspHeader['Content-Length'] = '%d' % len(rspBody)
-        self.sendHeader(rspHeader)
-        # self._set_headers(reqCmd)
-        # retStr = self._post_handler(post_data, reqCmd)
-        self.wfile.write(rspBody)
+        logging.debug(rspHeader)
+        logging.debug(rspBody)
+        msgRsp = self.makeRspMsg(rspHeader, rspBody)
+        self.wfile.write(msgRsp)
+
+    def makeRspMsg(self, dHeader, rspBody):
+        rspCode = int(dHeader.pop('Resp-Code'))
+        msgHeader = "%s %d %s\r\n" % (self.protocol_version, rspCode, self.responses[rspCode][0])
+        for key in dHeader:
+            msgHeader = '%s%s: %s\r\n' % (msgHeader, key, dHeader[key])
+        msgRsp = '%s\r\n%s' % (msgHeader, rspBody)
+        logging.debug((msgRsp))
+        return msgRsp
 
     def sendHeader(self, dHeader):
         rspCode = dHeader.pop('Resp-Code')
-        self.send_response(rspCode)
+        # rspCode = dHeader['Resp-Code']
+        logging.debug('response %s', rspCode)
+        self.send_response(int(rspCode))
         for key in dHeader:
+            # if key == 'Resp-Code': continue
+            logging.debug('%s: %s', key, dHeader[key])
+            self.send_header('Server','Huawei web server')
             self.send_header(key, dHeader[key])
+        self.send_header('Server', 'Huawei web server')
         self.end_headers()
 
+    def getRspMap(self, reqCmd):
+        if reqCmd in self.server.respMap:
+            rspMap = self.server.respMap[reqCmd]
+            logging.debug('rspMap: %s', rspMap)
+            return rspMap
+        reqCmd = 'OTHER'
+        if reqCmd in self.server.respMap:
+            rspMap = self.server.respMap[reqCmd]
+            logging.debug('rspMap: %s', rspMap)
+            return rspMap
+        return None
+
     def makeHeader(self, reqCmd):
-        dHeader = self.server.respHead[reqCmd]
+        rspMap = self.getRspMap(reqCmd)
+        if rspMap:
+            headKey = rspMap[0]
+            logging.debug('head key %s', headKey)
+        else:
+            logging.info('no find rspMap')
+            return None
+        if headKey in self.server.respHead:
+            dHeader = copy.deepcopy(self.server.respHead[headKey])
+            logging.debug('header: %s', dHeader)
+        else:
+            logging.debug('no find header %s : %s', headKey, self.server.respHead)
+            return None
         for headerKey in dHeader:
             if headerKey == 'Location':
                 value = dHeader[headerKey] % self.client_address
                 dHeader[headerKey] = value
+        logging.debug(dHeader)
         return dHeader
 
     def makeRspBody(self, reqData, reqCmd):
-        aRsp = self.server.respMap[reqCmd]
-        bodyKey = None
-        if len(aRsp) > 1:
-            bodyKey = aRsp[1]
+        rspMap = self.getRspMap(reqCmd)
+        if rspMap and len(rspMap) == 2:
+            bodyKey = rspMap[1]
+            logging.debug('bodyKey: %s', bodyKey)
         else:
+            logging.debug('no find bodyKey')
             return None
         if bodyKey in self.server.respBody:
-            rspBody = self.server.respBody[bodyKey]
+            rspBody = copy.deepcopy(self.server.respBody[bodyKey])
+            logging.debug(rspBody)
         else:
+            logging.debug('no find response body')
             return None
         aPattIsdnReq = self.server.servInfo['PISDNREQ']
         isdn = self.getValue(aPattIsdnReq, reqData)
@@ -381,6 +439,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         aPattImsiRsp = self.server.servInfo['PIMSIRSP']
         if imsi:
             rspBody = self.subValue(aPattImsiRsp, imsi, rspBody)
+        logging.debug(rspBody)
         return rspBody
 
     def subValue(self, aPatt, val, data):
@@ -455,8 +514,8 @@ class VirNetFac(object):
             if section == 'response head':
                 aRow = row.split(': ')
                 if aRow[0] == 'HEAD_KEY':
-                    self.respHead[row] = {}
-                    respHeadKey = row
+                    self.respHead[aRow[1]] = {}
+                    respHeadKey = aRow[1]
                 else:
                     self.respHead[respHeadKey][aRow[0]] = aRow[1]
                 continue
@@ -561,11 +620,11 @@ class Main(object):
             return None
         return f
 
-    def connectServer(self):
-        if self.conn is not None: return self.conn
-        self.conn = DbConn(self.cfg.dbinfo)
-        self.conn.connectServer()
-        return self.conn
+    # def connectServer(self):
+    #     if self.conn is not None: return self.conn
+    #     self.conn = DbConn(self.cfg.dbinfo)
+    #     self.conn.connectServer()
+    #     return self.conn
 
     # def connDb(self):
     #     if self.conn: return self.conn
@@ -596,40 +655,40 @@ class Main(object):
         elif self.facType == 'f':
             return self.makeFileFactory()
 
-    def makeTableFactory(self):
-        self.netType = 'KtPs'
-        self.netCode = 'kt4'
-        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
-        fac = TableFac(self)
-        return fac
+    # def makeTableFactory(self):
+    #     self.netType = 'KtPs'
+    #     self.netCode = 'kt4'
+    #     logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+    #     fac = TableFac(self)
+    #     return fac
 
-    def makeFileFactory(self):
-        if not self.fCmd:
-            self.fCmd = self.openFile(self.cmdFile, 'r')
-            logging.info('cmd file: %s', self.cmdFile)
-            if not self.fCmd:
-                logging.fatal('can not open command file %s. exit.', self.cmdFile)
-                exit(2)
-
-        for line in self.fCmd:
-            if line[:8] == '#NETTYPE':
-                aType = line.split()
-                self.netType = aType[2]
-            if line[:8] == '#NETCODE':
-                aCode = line.split()
-                self.netCode = aCode[2]
-            if self.netType and self.netCode:
-                logging.info('net type: %s  net code: %s', self.netType, self.netCode)
-                break
-        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
-        if self.netType is None:
-            logging.fatal('no find net type,exit.')
-            exit(3)
-        # facName = '%sFac' % self.netType
-        # fac_meta = getattr(self.appNameBody, facName)
-        # fac = fac_meta(self)
-        fac = FileFac(self)
-        return fac
+    # def makeFileFactory(self):
+    #     if not self.fCmd:
+    #         self.fCmd = self.openFile(self.cmdFile, 'r')
+    #         logging.info('cmd file: %s', self.cmdFile)
+    #         if not self.fCmd:
+    #             logging.fatal('can not open command file %s. exit.', self.cmdFile)
+    #             exit(2)
+    #
+    #     for line in self.fCmd:
+    #         if line[:8] == '#NETTYPE':
+    #             aType = line.split()
+    #             self.netType = aType[2]
+    #         if line[:8] == '#NETCODE':
+    #             aCode = line.split()
+    #             self.netCode = aCode[2]
+    #         if self.netType and self.netCode:
+    #             logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+    #             break
+    #     logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+    #     if self.netType is None:
+    #         logging.fatal('no find net type,exit.')
+    #         exit(3)
+    #     # facName = '%sFac' % self.netType
+    #     # fac_meta = getattr(self.appNameBody, facName)
+    #     # fac = fac_meta(self)
+    #     fac = FileFac(self)
+    #     return fac
 
     @staticmethod
     def createInstance(module_name, class_name, *args, **kwargs):

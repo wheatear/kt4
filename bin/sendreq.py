@@ -266,7 +266,7 @@ class HttpShortClient(object):
         self.makeHttpHead()
 
     def makeHttpHead(self):
-        httpHead = 'POST ^<GLOBAL_URL^> HTTP/1.1\r\n'
+        httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
         httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
         httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
         httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
@@ -299,6 +299,7 @@ class HttpShortClient(object):
 
     def sendOrder(self, order):
         self.makeHttpMsg(order)
+        self.connectServer()
         # logging.debug(order.httpRequest)
         for req in order.aReqMsg:
             logging.debug('send:%s', req)
