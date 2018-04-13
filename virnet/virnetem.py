@@ -327,14 +327,13 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_POST(self):
         # get post data
         post_data = self.rfile.read(int(self.headers['content-length']))
-        # post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
+        post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
         logging.debug('get request from %s %s %d %s', self.client_address, self.request_version, self.close_connection, self.version_string())
         logging.debug(post_data)
         aPtCmd = self.server.servInfo['PCMD']
         for pt in aPtCmd:
             pt = eval(pt)
             logging.debug('cmd pattern: %s', pt)
-            # pt = ':Body>\s*<m:(\w+?)[\s>]'
             m = re.search(pt, post_data)
             if m: break
         reqCmd = None
@@ -347,25 +346,27 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         rspHeader = self.makeHeader(reqCmd)
         rspBody = self.makeRspBody(post_data, reqCmd)
         if not rspHeader:
-            self.send_error(400)
+            self.send_error(400, 'no find header of %s' % reqCmd)
             return
         if not rspBody:
             rspHeader['Content-Length'] = '%d' % 0
-            logging.debug(rspHeader)
-            self.sendHeader(rspHeader)
-            return
-        rspHeader['Content-Length'] = '%d' % len(rspBody)
-        logging.debug(rspHeader)
-        logging.debug(rspBody)
+        else:
+            rspHeader['Content-Length'] = '%d' % len(rspBody)
+        # logging.debug(rspHeader)
+        # logging.debug(rspBody)
         msgRsp = self.makeRspMsg(rspHeader, rspBody)
         self.wfile.write(msgRsp)
+        logging.debug('send response ok.')
 
     def makeRspMsg(self, dHeader, rspBody):
         rspCode = int(dHeader.pop('Resp-Code'))
         msgHeader = "%s %d %s\r\n" % (self.protocol_version, rspCode, self.responses[rspCode][0])
         for key in dHeader:
             msgHeader = '%s%s: %s\r\n' % (msgHeader, key, dHeader[key])
-        msgRsp = '%s\r\n%s' % (msgHeader, rspBody)
+        if rspBody:
+            msgRsp = '%s\r\n%s' % (msgHeader, rspBody)
+        else:
+            msgRsp = '%s\r\n' % msgHeader
         logging.debug((msgRsp))
         return msgRsp
 
