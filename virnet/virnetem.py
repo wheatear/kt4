@@ -445,7 +445,7 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def subValue(self, aPatt, val, data):
         for pt in aPatt:
-            ptValue = pt.replace('(\d+)', val)
+            ptValue = pt.replace('\d+', val)
             rspValue = re.subn(pt, ptValue, data)
             if rspValue[1] > 0:
                 return rspValue[0]
@@ -458,7 +458,6 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if m: return m.group(1)
         return m
 
-        
 
 class VirNetFac(object):
     def __init__(self, main, netfile):
@@ -545,10 +544,6 @@ class VirNetFac(object):
         neServer.respBody = self.respBody
         neServer.respMap = self.respMap
         return neServer
-
-
-    def makeHandler(self):
-        pass
 
 
 class Main(object):
