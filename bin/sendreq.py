@@ -425,7 +425,7 @@ class DbConn(object):
         return cur
 
     def executemanyCur(self, cur, params):
-        logging.info('execute cur %s', cur.statement)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             cur.executemany(None, params)
         except orcl.DatabaseError, e:
@@ -569,6 +569,8 @@ class KtPsClient(HttpShortClient):
         aParam = []
         for req in order.aReqMsg:
             aParam.append(req.cmdTmpl)
+            logging.debug('order cmd: %s', req.cmdTmpl)
+        # logging.debug(aParam)
         self.conn.executemanyCur(cur, aParam)
         cur.connection.commit()
         # for req in order.aReqMsg:
@@ -691,6 +693,7 @@ class FileFac(object):
 
     def makeOrder(self):
         orderClassName = '%sOrder' % self.netType
+        logging.debug('load order %s.', orderClassName)
         for line in self.orderDs:
             line = line.strip()
             logging.debug(line)
@@ -703,7 +706,7 @@ class FileFac(object):
             order = createInstance(self.main.appNameBody, orderClassName)
             order.setParaName(self.aFildName)
             order.setPara(aParams)
-            logging.debug(order.dParam)
+            logging.debug('order param: %s', order.dParam)
             # netCode = self.aNetInfo[0]['NetCode']
             order.net = self.dNetClient[self.netCode]
             return order
@@ -734,6 +737,7 @@ class TableFac(FileFac):
         tmpl = None
         tmplMsg = ''
         # sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
+        logging.info('load cmd template.')
         cur = self.getCurbyName('LOADTMPL')
         self.conn.executeCur(cur)
         rows = self.conn.fetchall(cur)
@@ -744,7 +748,7 @@ class TableFac(FileFac):
             tmpl = KtPsTmpl(cmd)
             self.aCmdTemplates.append(tmpl)
             # logging.info(line)
-            logging.info(cmd)
+            logging.info('cmd template: %s', cmd)
         cur.close()
         logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
 
