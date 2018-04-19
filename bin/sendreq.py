@@ -716,6 +716,7 @@ class FileFac(object):
 class TableFac(FileFac):
     dSql = {}
     dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort'
+    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 and ps_id=:PS_ID order by sort'
     dCur = {}
     def __init__(self, main):
         super(self.__class__, self).__init__(main)
@@ -738,8 +739,13 @@ class TableFac(FileFac):
         tmplMsg = ''
         # sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
         logging.info('load cmd template.')
-        cur = self.getCurbyName('LOADTMPL')
-        self.conn.executeCur(cur)
+        para = None
+        if self.main.psId:
+            cur = self.getCurbyName('LOADTMPLBYPS')
+            para = {'PS_ID': self.main.psId}
+        else:
+            cur = self.getCurbyName('LOADTMPL')
+        self.conn.executeCur(cur, para)
         rows = self.conn.fetchall(cur)
         for line in rows:
             cmd = {}
@@ -802,6 +808,7 @@ class Main(object):
         self.netType = None
         self.netCode = None
         self.conn = None
+        self.psId = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -856,7 +863,7 @@ class Main(object):
         argvs = sys.argv[1:]
         self.facType = 'f'
         try:
-            opts, arvs = getopt.getopt(argvs, "t:")
+            opts, arvs = getopt.getopt(argvs, "t:p:")
         except getopt.GetoptError, e:
             orderMode = 't'
             print 'get opt error:%s. %s' % (argvs,e)
@@ -866,6 +873,8 @@ class Main(object):
             if opt == '-t':
                 self.facType = 't'
                 self.cmdFile = arg
+            elif opt == '-p':
+                self.psId = arg
         if self.facType == 'f':
             self.cmdFile = arvs[0]
             self.dsIn = arvs[1]
@@ -875,8 +884,8 @@ class Main(object):
         # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
     def usage(self):
-        print "Usage: %s [-t] cmdfile datafile" % self.appName
-        print "example:   %s %s" % (self.appName,'creatUser teldata')
+        print "Usage: %s [-t] cmdfile [-p psid] datafile" % self.appName
+        print "example:   %s %s" % (self.appName,'creatUser -p 2577133267 teldata')
         exit(1)
 
     def openFile(self, fileName, mode):
