@@ -477,7 +477,7 @@ class KtPsClient(HttpShortClient):
     dSql = {}
     dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
     dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
-    dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5)'
+    dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES,notes) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5,:NOTES)'
     dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
     dCur = {}
@@ -568,11 +568,17 @@ class KtPsClient(HttpShortClient):
         # logging.debug(order.aReqMsg)
         aParam = []
         for req in order.aReqMsg:
-            aParam.append(req.cmdTmpl)
-            logging.debug('order cmd: %s', req.cmdTmpl)
+            # aParam.append(req.cmdTmpl)
+            # logging.debug('order cmd: %s', req.cmdTmpl)
+            cmd = req.cmdTmpl
+            cmd['NOTES'] = '%s : %s' % (cmd.pop('PS_MODEL_NAME'), cmd.pop('OLD_PS_ID'))
+            aParam = [req.cmdTmpl]
+            self.conn.executemanyCur(cur, aParam)
+            cur.connection.commit()
+            time.sleep(3)
         # logging.debug(aParam)
-        self.conn.executemanyCur(cur, aParam)
-        cur.connection.commit()
+        # self.conn.executemanyCur(cur, aParam)
+        # cur.connection.commit()
         # for req in order.aReqMsg:
         #     req['REGION_CODE'] = order.dParam['REGION_CODE']
         #     logging.debug('send:%s', req)
@@ -715,8 +721,8 @@ class FileFac(object):
 
 class TableFac(FileFac):
     dSql = {}
-    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort'
-    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 and ps_id=:PS_ID order by sort'
+    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where status=1 order by sort'
+    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where status=1 and ps_id=:PS_ID order by sort'
     dCur = {}
     def __init__(self, main):
         super(self.__class__, self).__init__(main)
@@ -751,6 +757,7 @@ class TableFac(FileFac):
             cmd = {}
             for i,field in enumerate(cur.description):
                 cmd[field[0]] = line[i]
+            cmd['OLD_PS_ID'] = cmd['PS_ID']
             tmpl = KtPsTmpl(cmd)
             self.aCmdTemplates.append(tmpl)
             # logging.info(line)
