@@ -283,6 +283,10 @@ class Director(object):
     pass
 
 
+class ThreadingHttpServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
+    pass
+
+
 class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     # pattCmdReq = r'<soapenv:Body>\W*<hss:(\w+)>'
     def _set_headers(self, headKey):
@@ -324,13 +328,44 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         query = urllib.splitquery(path)
         self._get_handler(query[1]);
 
+    def parse_request(self):
+        # logging.debug('req: %s', self.raw_requestline)
+        requestline = self.raw_requestline
+        requestline = requestline.rstrip('\r\n')
+        logging.debug('requestline; %s', requestline)
+        words = requestline.split()
+        if len(words) == 2:
+            self.raw_requestline = '%s %s' % (requestline, "HTTP/1.1")
+
+        return BaseHTTPServer.BaseHTTPRequestHandler.parse_request(self)
+
+    def log_message(self, format, *args):
+        logging.debug("%s - - [%s] %s\n" %
+                         (self.client_address,
+                          self.log_date_time_string(),
+                          format%args))
+
     def do_POST(self):
         # get post data
-        post_data = self.rfile.read(int(self.headers['content-length']))
-        post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
+        # self.close_connection = 0
+
+        logging.debug('request head: %s %s', self.client_address, self.headers)
+        msgLength = int(self.headers['content-length'])
+        logging.debug('request length: %d', msgLength)
+        logging.debug('connection_close: %s', self.close_connection)
+        if msgLength < 1:
+            self.sendHB()
+            return
+        post_data = self.rfile.read(msgLength)
+        # post_data = self.rfile.readlines()
+
+        # post_data = urllib.unquote(post_data).decode("utf-8", 'ignore')
         logging.debug('get request from %s %s %d %s', self.client_address, self.request_version, self.close_connection, self.version_string())
-        logging.debug(post_data)
+        recvLength = len(post_data)
+        logging.debug('recv length: %d', recvLength)
+        logging.debug('req: %s', post_data)
         aPtCmd = self.server.servInfo['PCMD']
+        m = None
         for pt in aPtCmd:
             pt = eval(pt)
             logging.debug('cmd pattern: %s', pt)
@@ -356,7 +391,31 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         # logging.debug(rspBody)
         msgRsp = self.makeRspMsg(rspHeader, rspBody)
         self.wfile.write(msgRsp)
+        # self.close_connection = 0
         logging.debug('send response ok.')
+
+    def sendHB(self):
+        headKey = 'HB_HEAD'
+        if headKey in self.server.respHead:
+            dHeader = copy.deepcopy(self.server.respHead[headKey])
+            logging.debug('header: %s', dHeader)
+        else:
+            logging.debug('no find header %s : %s', headKey, self.server.respHead)
+            return None
+        # for headerKey in dHeader:
+            # if headerKey == 'Location':
+            #     logging.debug('server addr: %s', self.address_string())
+            #
+            #     value = dHeader[headerKey] % self.client_address
+            #     dHeader[headerKey] = value
+        logging.debug(dHeader)
+        rspBody = ''
+        dHeader['Content-Length'] = '%d' % len(rspBody)
+        msgRsp = self.makeRspMsg(dHeader, rspBody)
+        self.wfile.write(msgRsp)
+        self.close_connection = 0
+        logging.debug('send HB response ok.')
+        # self.close_connection = 0
 
     def makeRspMsg(self, dHeader, rspBody):
         rspCode = int(dHeader.pop('Resp-Code'))
@@ -409,10 +468,12 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         else:
             logging.debug('no find header %s : %s', headKey, self.server.respHead)
             return None
-        for headerKey in dHeader:
-            if headerKey == 'Location':
-                value = dHeader[headerKey] % self.client_address
-                dHeader[headerKey] = value
+        # for headerKey in dHeader:
+            # if headerKey == 'Location':
+            #     logging.debug('server addr: %s', self.address_string())
+            #
+            #     value = dHeader[headerKey] % self.client_address
+            #     dHeader[headerKey] = value
         logging.debug(dHeader)
         return dHeader
 
@@ -430,18 +491,19 @@ class HttpHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         else:
             logging.debug('no find response body')
             return None
-        aPattIsdnReq = self.server.servInfo['PISDNREQ']
-        isdn = self.getValue(aPattIsdnReq, reqData)
-        aPattIsdnRsp = self.server.servInfo['PISDNRSP']
-        if isdn:
-            rspBody = self.subValue(aPattIsdnRsp,isdn, rspBody)
-        aPattImsiReq = self.server.servInfo['PIMSIREQ']
-        imsi = self.getValue(aPattImsiReq, reqData)
-        aPattImsiRsp = self.server.servInfo['PIMSIRSP']
-        if imsi:
-            rspBody = self.subValue(aPattImsiRsp, imsi, rspBody)
-        logging.debug(rspBody)
         return rspBody
+        # aPattIsdnReq = self.server.servInfo['PISDNREQ']
+        # isdn = self.getValue(aPattIsdnReq, reqData)
+        # aPattIsdnRsp = self.server.servInfo['PISDNRSP']
+        # if isdn:
+        #     rspBody = self.subValue(aPattIsdnRsp,isdn, rspBody)
+        # aPattImsiReq = self.server.servInfo['PIMSIREQ']
+        # imsi = self.getValue(aPattImsiReq, reqData)
+        # aPattImsiRsp = self.server.servInfo['PIMSIRSP']
+        # if imsi:
+        #     rspBody = self.subValue(aPattImsiRsp, imsi, rspBody)
+        # logging.debug(rspBody)
+        # return rspBody
 
     def subValue(self, aPatt, val, data):
         for pt in aPatt:
@@ -538,7 +600,8 @@ class VirNetFac(object):
         if serverType == 'SOCKET':
             neServer = SocketServer.ThreadingTCPServer(addr, MsHander)
         elif serverType == 'HTTP':
-            neServer = BaseHTTPServer.HTTPServer(addr, HttpHandler)
+            HttpHandler.protocol_version = "HTTP/1.1"
+            neServer = ThreadingHttpServer(addr, HttpHandler)
         neServer.servInfo = self.servInfo
         neServer.respHead = self.respHead
         neServer.respBody = self.respBody
