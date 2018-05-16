@@ -1447,6 +1447,7 @@ class KtBuilder(object):
 class CompareOrderGrp(CompareKtOrder):
     dCurSql = CompareKtOrder.dCurSql
     dCurSql['curAsyncSend'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,:createDate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
+    # dCurSql['curAsyncSend'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,sysdate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
 
     dCurSql['curAsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s where create_date>=:firstDate and create_date<=:lastDate'
     dCurSql['curAsyncTask'] = 'select rownum,old_ps_id,ps_id,bill_id,sub_bill_id,action_id,ps_service_type,ps_param,ps_status,fail_reason,fail_log,ps_service_code,ps_net_code from ps_split_his_%s where create_date>=:firstDate and create_date<=:lastDate order by old_ps_id,ps_id'
@@ -1471,11 +1472,12 @@ class CompareOrderGrp(CompareKtOrder):
         for i in range(self.size):
             case = self.ktCase.aCase[i]
             order = CompareKtOrder(case, self.ktClient, self.mode)
-            # order.psId = rows[i][0]
-            order.psId = case.psId
+            order.psId = rows[i][0]
+            # order.psId = case.psId
             order.doneCode = case.doneCode
             order.tradId = rows[i][0]
             order.regionCode = case.regionCode
+            order.createDate = datetime.datetime.now()
             case.dOrder[self.ktClient.ktName] = order
             self.aOrder.append(order)
             self.dOrder[order.psId] = order
@@ -1500,9 +1502,17 @@ class CompareOrderGrp(CompareKtOrder):
     def asyncSend(self):
         dParams = {'100':[],'110':[],'120':[],'130':[],'140':[],'150':[],'160':[],'170':[],'180':[],'190':[]}
         for order in self.aOrder:
+            # params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
+            #       'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
+            #       'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.ktCase.createDate}
             params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
                   'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
-                  'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.ktCase.createDate}
+                  'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.createDate}
+            # params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
+            #           'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
+            #           'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam,
+            #           'regionCode': order.regionCode}
+
             dParams[order.regionCode].append(params)
         for region in dParams:
             aPa = dParams[region]
@@ -1530,7 +1540,8 @@ class CompareOrderGrp(CompareKtOrder):
             # params = {'psId': order.psId}
             region = order.regionCode
             createDate = order.createDate
-            tableMonth = createDate.strftime('%Y%m')
+            # tableMonth = createDate.strftime('%Y%m')
+            tableMonth = time.strftime("%Y%m", time.localtime())
             paraKey = '%s_%s' % (region, tableMonth)
             if paraKey not in dParams:
                 dParams[paraKey] = {'firstDate':createDate, 'lastDate':createDate}
@@ -1589,7 +1600,8 @@ class CompareOrderGrp(CompareKtOrder):
             # params = {'psId': order.psId}
             region = order.regionCode
             createDate = order.createDate
-            tableMonth = createDate.strftime('%Y%m')
+            # tableMonth = createDate.strftime('%Y%m')
+            tableMonth = time.strftime("%Y%m", time.localtime())
             paraKey = '%s_%s' % (region, tableMonth)
             if paraKey not in dParams:
                 dParams[paraKey] = {'firstDate': createDate, 'lastDate': createDate}
@@ -2238,6 +2250,7 @@ class Main(object):
             builder = KtBuilder(self.cfg, self.caseDs, self.orderMode)
         if self.caseDsType == 't':
             builder = BatTableBuilder(self.cfg, self.caseDs, self.orderMode)
+            # builder = KtTableBuilder(self.cfg, self.caseDs, self.orderMode)
         # builder.orderMode = self.orderMode
         director = Director(builder, self.processFlow)
         director.start()

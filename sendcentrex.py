@@ -9,7 +9,7 @@
 ## Created at:
 ##
 ## Description:
-## 备注:
+##
 ##
 ######################################################################
 
@@ -322,11 +322,13 @@ class CentrexClient(object):
         self.cmdFile = cmdfile
         self.httpHead = None
         self.httpRequest = None
-        self.serverIp = None
-        self.port = None
+        # self.serverIp = '10.4.224.249'
+        # self.port = '8180'
+        self.serverIp = ''
+        self.port = '8180'
         self.url = None
-        self.user = None
-        self.passwd = None
+        self.user = 'huiwei'
+        self.passwd = 'admin'
         self.rtsname = None
         self.aCmdTemplates = []
         self.httpHead = None
@@ -401,12 +403,13 @@ class CentrexClient(object):
 
     def makeHttpHead(self):
         httpHead = 'POST /imsservice/services/CentrexService HTTP/1.1\r\n'
-        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
-        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
-        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
         httpHead = '%s%s' % (httpHead, 'Host: ^<server^>:^<sockPort^>\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Host: \r\n')
         httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
         httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
         httpHead = httpHead.replace('^<server^>', self.serverIp)

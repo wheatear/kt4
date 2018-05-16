@@ -267,9 +267,9 @@ class HttpShortClient(object):
 
     def makeHttpHead(self):
         httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
-        httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
-        httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
-        httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
         httpHead = '%s%s' % (httpHead, 'Host: ^<Ip^>:^<Port^>\r\n')

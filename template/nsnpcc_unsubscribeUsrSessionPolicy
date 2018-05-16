@@ -1,0 +1,31 @@
+#NETTYPE = HttpShort
+#NETCODE = NSNPCC62
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:pcrf="http://www.chinamobile.com/PCRF/" xmlns:pcrf1="pcrf:soap">
+   <soapenv:Header>
+   <pcrf:Header>
+      <serial>8857247</serial>
+      <time>20180513225635</time>
+      <Password>admin</Password>
+      <Username>admin</Username>
+      <Address>/</Address>
+   </pcrf:Header>
+   </soapenv:Header>
+   <soapenv:Body>
+      <pcrf1:unsubscribeUsrSessionPolicy>
+         <inPara>
+            <subscriber>
+               <attribute>
+                  <key>usrIdentifier</key>
+                  <value>8613621189791</value>
+               </attribute>
+            </subscriber>
+            <subscribedUsrSessionPolicy>
+               <attribute>
+                  <key>usrSessionPolicyCode</key>
+                  <value>12100010000000000000000000000197</value>
+               </attribute>
+            </subscribedUsrSessionPolicy>
+         </inPara>
+      </pcrf1:unsubscribeUsrSessionPolicy>
+   </soapenv:Body>
+</soapenv:Envelope>

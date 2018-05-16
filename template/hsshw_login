@@ -1,0 +1,3 @@
+#NETTYPE = HttpShort
+#NETCODE = HSSHW5
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:lgi="http://www.huawei.com/HLR9820/LGI"><soapenv:Header/><soapenv:Body><lgi:LGI><lgi:OPNAME>boss</lgi:OPNAME><lgi:PWD>cnp200@HW</lgi:PWD><lgi:HLRSN>5</lgi:HLRSN></lgi:LGI></soapenv:Body></soapenv:Envelope>
