@@ -390,7 +390,8 @@ class KtCase(object):
         self.actionId = actionId
         self.psParam = psParam
         self.comment = comment
-        self.createDate = createdate
+        # self.createDate = createdate
+        self.createDate = datetime.datetime.now()
 
         self.aCmdKey = []  # keys of commandes send to ne
         # self.taskCount = 0
@@ -1477,7 +1478,7 @@ class CompareOrderGrp(CompareKtOrder):
             order.doneCode = case.doneCode
             order.tradId = rows[i][0]
             order.regionCode = case.regionCode
-            order.createDate = datetime.datetime.now()
+            order.createDate = case.createDate
             case.dOrder[self.ktClient.ktName] = order
             self.aOrder.append(order)
             self.dOrder[order.psId] = order
@@ -1502,12 +1503,12 @@ class CompareOrderGrp(CompareKtOrder):
     def asyncSend(self):
         dParams = {'100':[],'110':[],'120':[],'130':[],'140':[],'150':[],'160':[],'170':[],'180':[],'190':[]}
         for order in self.aOrder:
-            # params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
-            #       'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
-            #       'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.ktCase.createDate}
             params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
                   'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
-                  'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.createDate}
+                  'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.ktCase.createDate}
+            # params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
+            #       'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
+            #       'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam, 'regionCode': order.regionCode, 'createDate':order.createDate}
             # params = {'psId': order.psId, 'doneCode': order.doneCode, 'psServiceType': order.ktCase.psServiceType,
             #           'billId': order.ktCase.billId, 'subBillId': order.ktCase.subBillId,
             #           'actionId': order.ktCase.actionId, 'psParam': order.ktCase.psParam,
