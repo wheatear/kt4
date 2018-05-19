@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+# -*- coding: utf-8 -*-
 """kt client"""
 
 import sys
@@ -764,7 +764,7 @@ class CompareKtOrder(KtOrder):
                 logging.debug('%s: %d' ,psOrder.ktClient.ktName, cmpaTaskNum)
                 self.asyncComparision = 1
 
-                return self.asyncComparision  # ???????
+                return self.asyncComparision  # 子工单数不一致
             if myTaskNum == 0:
                 return self.compareAsyncOrder(psOrder)
         # logging.debug('compare asyncronous orders')
@@ -789,11 +789,11 @@ class CompareKtOrder(KtOrder):
         if self.psStatus != psOrder.psStatus:
             self.asyncComparision = 9
             logging.debug('psstatus:%d,%d : %d,%d', self.psId, self.psStatus, psOrder.psId, psOrder.psStatus)
-            return 9 # ps_status ???
+            return 9 # ps_status 不一致
         if self.failReason != psOrder.failReason:
             logging.debug('psstatus:%d,%s : %d,%s', self.psId, self.failReason, psOrder.psId, psOrder.failReason)
             self.asyncComparision = 10
-            return 10 #order fail_reason ???
+            return 10 #order fail_reason 不一致
         if self.psStatus == -1:
             self.asyncComparision = 14
         self.asyncComparision = 0
@@ -856,15 +856,15 @@ class KtTask(object):
         logging.info('compare task:  %d %d %d : %d %d %d', self.oldPsId, self.taskNum, self.ps_id, task.oldPsId,
                      task.taskNum, task.ps_id)
         if self.action_id != task.action_id:
-            return 2  # action_id ???
+            return 2  # action_id 不一致
         if self.ps_param != task.ps_param:
-            return 3  # ps_param ???
+            return 3  # ps_param 不一致
         if self.ps_service_type != task.ps_service_type:
-            return 7  # ps_service_type ???
+            return 7  # ps_service_type 不一致
         # if self.ps_net_code != task.ps_net_code:
-        #     return 6  # ps_net_code ???
+        #     return 6  # ps_net_code 不一致
         if self.ps_service_code != task.ps_service_code:
-            return 5  # ps_service_code ???
+            return 5  # ps_service_code 不一致
         self.replaceVar()
         task.replaceVar()
         FailLog = str(self.fail_log)
@@ -872,12 +872,12 @@ class KtTask(object):
         if FailLog != cmprFailLog:
             logging.info('compare false: %d %d, %s', self.oldPsId, self.taskNum, FailLog)
             logging.info('compare false: %d %d, %s', task.oldPsId, task.taskNum, cmprFailLog)
-            return 4  # fail_log ???
+            return 4  # fail_log 不一致
         if self.ps_status != task.ps_status:
-            return 9  # ps_status ???
+            return 9  # ps_status 不一致
         if self.fail_reason != task.fail_reason:
-            return 10  # fail_reason ???
-        return 0  # ????
+            return 10  # fail_reason 不一致
+        return 0  # 比对一致
 
     def replaceVar(self):
         failLog = str(self.fail_log)
@@ -1451,6 +1451,7 @@ class CompareOrderGrp(CompareKtOrder):
     # dCurSql['curAsyncSend'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES) values(:psId,0,:doneCode,0,80,:psServiceType,:billId,:subBillId,sysdate,sysdate,sysdate,:actionId,:psParam,0,530,:regionCode,100,0,5)'
 
     dCurSql['curAsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s where create_date>=:firstDate and create_date<=:lastDate'
+    # dCurSql['curAsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s where ps_id=:psId'
     dCurSql['curAsyncTask'] = 'select rownum,old_ps_id,ps_id,bill_id,sub_bill_id,action_id,ps_service_type,ps_param,ps_status,fail_reason,fail_log,ps_service_code,ps_net_code from ps_split_his_%s where create_date>=:firstDate and create_date<=:lastDate order by old_ps_id,ps_id'
 
     def __init__(self, casegrp, ktclient, mode):
@@ -1541,11 +1542,13 @@ class CompareOrderGrp(CompareKtOrder):
             # params = {'psId': order.psId}
             region = order.regionCode
             createDate = order.createDate
+            psId = order.psId
             # tableMonth = createDate.strftime('%Y%m')
             tableMonth = time.strftime("%Y%m", time.localtime())
             paraKey = '%s_%s' % (region, tableMonth)
             if paraKey not in dParams:
                 dParams[paraKey] = {'firstDate':createDate, 'lastDate':createDate}
+                # dParams[paraKey] = {'psId': psId}
             else:
                 dRegionPara = dParams[paraKey]
                 if createDate < dRegionPara['firstDate']:
@@ -1579,6 +1582,7 @@ class CompareOrderGrp(CompareKtOrder):
                             # fr = row[2].replace('{','')
                             # fr = fr.replace('}', '')
                             self.dOrder[psId].failReason = row[2]
+                            logging.debug('order status : %s %s %s', psId, row[1], row[2])
                             i += 1
                     result = self.ktClient.fetchmany(cur)
                     rownum = len(result)
