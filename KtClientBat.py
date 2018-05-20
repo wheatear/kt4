@@ -1465,20 +1465,21 @@ class CompareOrderGrp(CompareKtOrder):
 
     def loadOrderInfo(self):
         logging.debug('load sequence for ps_id and done_code.')
-        orderIdSql = CompareOrderGrp.dCurSql['curOrderId'] % self.size
-        cur = self.ktClient.getCurbyName('curOrderId', orderIdSql)
-        if self.size > 100:
-            cur.arraysize = self.size
-        self.ktClient.executeCur(cur)
-        rows = self.ktClient.fetchmany(cur)
+        # orderIdSql = CompareOrderGrp.dCurSql['curOrderId'] % self.size
+        # cur = self.ktClient.getCurbyName('curOrderId', orderIdSql)
+        # if self.size > 100:
+        #     cur.arraysize = self.size
+        # self.ktClient.executeCur(cur)
+        # rows = self.ktClient.fetchmany(cur)
         for i in range(self.size):
             case = self.ktCase.aCase[i]
             order = CompareKtOrder(case, self.ktClient, self.mode)
-            order.psId = rows[i][0]
-            # order.psId = case.psId
-            order.doneCode = case.doneCode
-            order.tradId = rows[i][0]
-            order.regionCode = case.regionCode
+            KtOrder.loadOrderInfo(order)
+            # order.psId = rows[i][0]
+            # # order.psId = case.psId
+            # order.doneCode = case.doneCode
+            # order.tradId = rows[i][0]
+            # order.regionCode = case.regionCode
             order.createDate = case.createDate
             case.dOrder[self.ktClient.ktName] = order
             self.aOrder.append(order)
