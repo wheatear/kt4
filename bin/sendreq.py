@@ -778,7 +778,7 @@ class Director(object):
         self.fRsp = None
 
     def start(self):
-        self.factory.loadCmd()
+        self.factory.buildCmd()
         self.factory.makeNet()
         self.factory.openDs()
         self.factory.makeOrderFildName()

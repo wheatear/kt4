@@ -631,7 +631,7 @@ class CentrexFac(object):
         logging.info('load %d clients.', len(self.aClient))
         for centrex in self.aClient:
             # centrex.connectServer()
-            centrex.loadCmd()
+            centrex.buildCmd()
             centrex.makeCmdTempate()
             centrex.makeHttpHead()
         return self.aClient

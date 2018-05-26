@@ -396,7 +396,7 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        scmd = self.factory.loadCmd()
+        scmd = self.factory.buildCmd()
         # localIp = self.factory.getLocalIp()
         dHosts = self.factory.loadHosts()
         localHost = socket.gethostname()
@@ -409,7 +409,7 @@ class Director(object):
             i += 1
             logging.debug('timeer %f host %s', time.time(), hostName)
             host = dHosts[hostName]
-            reSh = self.factory.makeReSh(host, scmd)
+            reSh = self.factory.buildAcConsole(host, scmd)
             aReSh.append(reSh)
             reSh.start()
         logging.info('start %d remotesh.', i)

@@ -193,7 +193,7 @@ class Conf(object):
         logging.info('load dbinfo, %s %s %s', self.dbinfo['dbusr'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
         return self.dbinfo
 
-class ReHost(object):
+class KtHost(object):
     def __init__(self, hostName, hostIp, port, timeOut):
         self.hostName = hostName
         self.hostIp = hostIp
@@ -201,17 +201,25 @@ class ReHost(object):
         self.timeOut = timeOut
 
 
-class ReCmd(object):
+class AcCmd(object):
     def __init__(self):
         self.cmd = r'appControl -c %s:%s'
         self.prompt = r'\(ac console\)# '
+        self.prcPattern = r'( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+)\r\n'
         self.aCmds = []
+        # self.hosts = []
 
     def addCmd(self, cmdStr):
         self.aCmds.append(cmdStr)
 
+    def __str__(self):
+        str = '%s\n' % self.cmd
+        for cmd in self.aCmds:
+            str = '%s%s\n' % (str,cmd)
+        return str
 
-class RemoteSh(threading.Thread):
+
+class AcConsole(threading.Thread):
     def __init__(self, reCmd, reHost, logPre):
         threading.Thread.__init__(self)
         self.reCmd = reCmd
@@ -296,34 +304,146 @@ class RemoteSh(threading.Thread):
         clt.sendline('exit')
         clt.prompt()
 
-class ReShFac(object):
-    sqlHost = "select machine_name,rpc_ip,rpc_port,time_out from rpc_register where app_name='appControl' and state=1 order by machine_name"
+    def printInfo(self):
+        pass
 
+class AcBuilder(object):
+    sqlHost = "select machine_name,rpc_ip,rpc_port,time_out from rpc_register where app_name='appControl' and state=1 order by machine_name"
+    sqlNet = "select process_name,ip,net_code from ps_proxy_route where state=1"
+    # sqlProcess = "select process_name,ip,net_code from ps_proxy_route where state=1"
+    sqlProcess = "select m.machine_name,r.ip,m.process_name,r.net_code from sys_machine_process m, ps_proxy_route r where m.state=1 and m.process_name=r.process_name(+) order by m.machine_name,m.sort"
     def __init__(self, main):
         self.main = main
         self.group = main.group
-        self.hosts = main.hosts
+        self.arvHosts = main.hosts
+        self.conn = self.main.conn
+        self.dHosts = {}
+        self.dProcess = {}
+        self.acCmd = None
+        self.aAcCons = []
         # self.dest = dest
 
-    def loadCmd(self):
+    def buildCmd(self):
         logging.info('create cmd ')
-        cmd = ReCmd()
-        cmd.addCmd('query')
+        main = self.main
+        cmd = AcCmd()
+        if main.objType == 'h':
+            if main.cmd == 'r':
+                cmd.addCmd('shutdownall')
+                cmd.addCmd('startupall')
+            elif main.cmd == 's':
+                cmd.addCmd('startupall')
+            elif main.cmd == 'd':
+                cmd.addCmd('shutdownall')
+            elif main.cmd == 'q':
+                cmd.addCmd('query')
+        else:
+            if main.cmd == 'r':
+                cmd.addCmd('shutdown')
+                cmd.addCmd('startup')
+            elif main.cmd == 's':
+                cmd.addCmd('startup')
+            elif main.cmd == 'd':
+                cmd.addCmd('shutdown')
+            elif main.cmd == 'query':
+                cmd.addCmd('query')
+
+        # cmd.addCmd('query')
+        self.acCmd = cmd
         return cmd
 
-    def makeReSh(self, host, cmd):
-        logging.info('create remote appc of %s', host.hostName)
-        reSh = RemoteSh(cmd, host, self.main.logPre)
-        return reSh
+    def buildAcConsole(self):
+        logging.info('create remote appc ')
+        for hostName in self.dProcess:
+            print(hostName)
+            # hostName = self.dProcess[process][0]
+            host = self.dHosts[hostName]
+            acCons = AcConsole(self.acCmd, host, self.main.logPre)
+            self.aAcCons.append(acCons)
+        return self.aAcCons
+
+    def printAllProcess(self):
+        for host in self.dProcess:
+            print(self.dProcess[host])
+
+    def printAllHost(self):
+        for hostName in self.dHosts:
+            host = self.dHosts[hostName]
+            print('%s %s %s %s' % (host.hostName, host.hostIp, host.port, host.timeOut))
+
+    def loadProcess(self):
+        # dProcess = {}
+        sql = self.sqlProcess
+        para = None
+        # condition = ''
+        # if main.objType == 'p':
+        #     condition = ' and m.process_name=:PROCESS_NAME'
+        #     para = {'PROCESS_NAME': main.obj}
+        #     sql = '%s%s' % (self.sqlProcess, condition)
+        cur = self.conn.prepareSql(sql)
+        self.conn.executeCur(cur, para)
+        rows = self.conn.fetchall(cur)
+        cur.close()
+        aNets = None
+        aProcess = None
+        aProcName = None
+        aHosts = None
+        if main.objType == 'n':
+            aNets = main.obj.split(',')
+        elif main.objType == 'p':
+            aProcess = main.obj.split(',')
+            aProcName = self.parseProcess(aProcess)
+        if not main.host:
+            if main.host == 'a':
+                aHosts = None
+            else:
+                aHosts = main.host.split(',')
+        for row in rows:
+            host = row[0]
+            processName = row[2]
+            netName = row[3]
+            if aHosts:
+                if host not in aHosts:
+                    continue
+            if aProcess:
+                if processName not in aProcName:
+                    continue
+                else:
+                    row[2] = self.getProcess(processName, aProcess)
+            if aNets:
+                if netName not in aNets:
+                    continue
+                else:
+                    row[2] = '%s%s' % ('app_ne|busicomm|', processName)
+
+            print(row)
+            if host in self.dProcess:
+                self.dProcess[host].append(row)
+            else:
+                self.dProcess[host] = [row]
+        return self.dProcess
+
+    def parseProcess(self, acProcess):
+        aProcName = []
+        for proc in acProcess:
+            aProc = proc.split('|')
+            aProcName.append(aProc[2])
+        return aProcName
+
+    def getProcess(self, name, acProcess):
+        for acPro in acProcess:
+            aProc = acPro.split('|')
+            if name == aProc[2]:
+                return acPro
+        return None
 
     def loadHosts(self):
-        dHosts = {}
-        cur = self.main.conn.cursor()
-        cur.execute(self.sqlHost)
-        rows = cur.fetchall()
+        cur = self.conn.prepareSql(self.sqlHost)
+        self.conn.executeCur(cur)
+        rows = self.conn.fetchall(cur)
         cur.close()
         for row in rows:
-            dHosts[row[0]] = ReHost(*row)
+            self.dHosts[row[0]] = KtHost(*row)
         # dHosts['skt2'] = ReHost('skt2', '10.4.72.67', '15200')
         # dHosts['skt3'] = ReHost('skt3', '10.4.72.68', '15200')
         # dHosts['skt4'] = ReHost('skt4', '10.4.72.69', '15200')
@@ -333,7 +453,7 @@ class ReShFac(object):
         # dHosts['skt8'] = ReHost('skt8', '10.4.72.73', '15200')
         # dHosts['skt9'] = ReHost('skt9', '10.4.72.74', '15200')
         # dHosts['skt10'] = ReHost('skt10', '10.4.72.75', '15200')
-        return dHosts
+        return self.dHosts
 
     def startAll(self):
         logging.info('all host to connect: %s' , self.aHosts)
@@ -405,6 +525,18 @@ class DbConn(object):
             return None
         return cur
 
+    def executeCur(self, cur, params=None):
+        logging.info('execute cur %s', cur.statement)
+        try:
+            if params is None:
+                cur.execute(None)
+            else:
+                cur.execute(None, params)
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return cur
+
     def fetchmany(self, cur):
         logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
         try:
@@ -432,22 +564,10 @@ class DbConn(object):
             return None
         return rows
 
-    def executeCur(self, cur, params=None):
-        logging.info('execute cur %s', cur.statement)
-        try:
-            if params is None:
-                cur.execute(None)
-            else:
-                cur.execute(None, params)
-        except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
-            return None
-        return cur
-
 
 class Director(object):
-    def __init__(self, factory):
-        self.factory = factory
+    def __init__(self, builder):
+        self.builder = builder
         self.shutDown = None
         self.fRsp = None
 
@@ -455,28 +575,24 @@ class Director(object):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        appcmd = self.factory.loadCmd()
+        appcmd = self.builder.buildCmd()
         # localIp = self.factory.getLocalIp()
-        dHosts = self.factory.loadHosts()
+        print(appcmd)
+        dHosts = self.builder.loadHosts()
+        dProcess = self.builder.loadProcess()
+        self.builder.printAllProcess()
+        self.builder.printAllHost()
         localHost = socket.gethostname()
+        aAcCons = self.builder.buildAcConsole()
+        # self.builder.printAllProcess()
+        procNum = len(aAcCons)
+        for ac in aAcCons:
+            ac.start()
 
-        i = 0
-        aReSh = []
-        for hostName in dHosts:
-            # if hostName == localHost:
-            #     continue
-            i += 1
-            logging.debug('timeer %f host %s', time.time(), hostName)
-            host = dHosts[hostName]
-            reSh = self.factory.makeReSh(host, appcmd)
-            aReSh.append(reSh)
-            reSh.start()
-        logging.info('start %d remotesh.', i)
-
-        for reSh in aReSh:
-            reSh.join()
-            logging.info('host %s cmd completed.', reSh.host.hostName)
-        logging.info('all %d remotesh completed.', i)
+        for ac in aAcCons:
+            ac.join()
+            logging.info('host %s cmd completed.', ac.host.hostName)
+        logging.info('all %d remotesh completed.', procNum)
 
 
 class Main(object):
@@ -485,6 +601,10 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.conn = None
+        self.cmd = None
+        self.objType = None
+        self.host = None
+        self.obj = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -506,7 +626,6 @@ class Main(object):
                 self.dirApp = dirApp
             else:
                 self.dirApp = dirApp
-
         self.dirLog = os.path.join(self.dirApp, 'log')
         self.dirCfg = os.path.join(self.dirApp, 'config')
         self.dirTpl = os.path.join(self.dirApp, 'template')
@@ -533,24 +652,38 @@ class Main(object):
         self.group = []
         self.hosts = []
         try:
-            opts, arvs = getopt.getopt(argvs, "rsdqh:")
+            opts, arvs = getopt.getopt(argvs, "c:t:h:")
         except getopt.GetoptError, e:
             print 'get opt error:%s. %s' % (argvs, e)
-            # self.usage()
-        self.mode = 'query'
-        # for opt, arg in opts:
-        #     if opt == '-r':
-        #         self.mode = 'restart'
-        #     elif opt == '-s':
-        #         self.mode = 'start'
-        #     elif opt == '-d':
-        #         self.mode = 'shutdown'
-        #     elif opt == '-q':
-        #         self.mode = 'query'
+            self.usage()
+        self.cmd = 'q'
+        self.objType = 'h'
+        self.host = 'a'
+        for opt, arg in opts:
+            if opt == '-c':
+                self.cmd = arg
+            elif opt == '-t':
+                self.objType = arg
+            elif opt == '-h':
+                self.host = arg
+        if len(arvs) > 0:
+            self.obj = arvs[0]
 
     def usage(self):
-        print "Usage: %s [-r] [-s] [-d] [-q]" % self.baseName
-        print "example:   %s %s" % (self.baseName,' -g ktgroup mkdir.sh')
+        print "Usage: %s [-c r/s/d/q] [-t h/n/p] [-h a/KTNEW_01,KTNEW_02]" % self.baseName
+        print('-c r/s/d/q   ktac command')
+        print('   r  restartup')
+        print('   s  startup')
+        print('   d  shutdown')
+        print('   q  query')
+        print('-t h/n/p   command object type')
+        print('   h  host')
+        print('   n  network element')
+        print('   p  process')
+        print('-h a/KTNEW_01,KTNEW_02   hosts ')
+        print('   a  all hosts')
+        print('   KTNEW_01,KTNEW_02  some hosts')
+        print "example:  %s %s" % (self.baseName,' -c r -t h -h a ')
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -581,18 +714,18 @@ class Main(object):
         self.checkArgv()
         self.parseWorkEnv()
 
-        self.cfg = Conf(main, self.cfgFile)
+        self.cfg = Conf(self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
-        self.logLevel = logging.DEBUG
+        # self.logLevel = logging.DEBUG
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
         self.cfg.loadDbinfo()
         self.connectServer()
-        factory = ReShFac(self)
+        builder = AcBuilder(self)
         # remoteShell.loger = loger
-        director = Director(factory)
+        director = Director(builder)
         director.start()
 
         # remoteShell.join()
