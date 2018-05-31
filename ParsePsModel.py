@@ -455,8 +455,8 @@ class Main(object):
         # self.logFile = 'psparse.log'
         self.client = None
         self.caseDs = None
-        # self.resultOut = 'PS_MODEL_SUMMARY'
-        self.resultOut = 'PS_SYNCMODEL_SUMMARY'
+        self.resultOut = 'PS_MODEL_SUMMARY'
+        # self.resultOut = 'PS_SYNCMODEL_SUMMARY'
 
     def checkArgv(self):
         if self.argc < 2:

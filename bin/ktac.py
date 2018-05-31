@@ -6,6 +6,7 @@
 import sys
 import os
 import time
+import copy
 import multiprocessing
 import Queue
 import signal
@@ -200,12 +201,16 @@ class KtHost(object):
         self.port = port
         self.timeOut = timeOut
 
+    def __str__(self):
+        str = '%s %s %s %s' % (self.hostName, self.hostIp, self.port, self.timeOut)
+        return str
+
 
 class AcCmd(object):
     def __init__(self):
         self.cmd = r'appControl -c %s:%s'
         self.prompt = r'\(ac console\)# '
-        self.prcPattern = r'( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+)\r\n'
+        self.prcPattern = r'(( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+))\r\n'
         self.aCmds = []
         # self.hosts = []
 
@@ -220,17 +225,25 @@ class AcCmd(object):
 
 
 class AcConsole(threading.Thread):
-    def __init__(self, reCmd, reHost, logPre):
+    def __init__(self, reCmd, objType, reHost, aHostProcess, aProcess, logPre):
         threading.Thread.__init__(self)
         self.reCmd = reCmd
+        self.objType = objType
         self.host = reHost
-        self.reCmd.cmd = 'appControl -c %s:%s' % (reHost.hostIp, str(reHost.port))
+        # self.reCmd.cmd = 'appControl -c %s:%s' % (reHost.hostIp, str(reHost.port))
+        self.aProcess = aProcess
+        self.aHostProcess = aHostProcess
+        self.dDoneProcess = {}
         self.logPre = logPre
+        self.queryNum = 10
 
     def run(self):
         logging.info('remote shell of host %s running in pid:%d %s', self.host.hostName, os.getpid(), self.name)
-        appc = pexpect.spawn(self.reCmd.cmd)
+        self.reCmd.cmd = 'appControl -c %s:%s' % (self.host.hostIp, str(self.host.port))
+        timeOut = self.host.timeOut / 1000
         print(self.reCmd.cmd)
+        appc = pexpect.spawn(self.reCmd.cmd, timeout=timeOut)
+        # print(self.reCmd.cmd)
         flog1 = open('%s_%s.log1' % (self.logPre, self.host.hostName), 'a')
         flog2 = open('%s_%s.log2' % (self.logPre, self.host.hostName), 'a')
         flog1.write('%s %s starting%s' % (time.strftime("%Y%m%d%H%M%S", time.localtime()), self.host.hostName, os.linesep))
@@ -246,29 +259,26 @@ class AcConsole(threading.Thread):
 
         cmdcontinue = 0
         # prcPattern = r'( ?\d)\t(app_\w+)\|(\w+)\|(\w+)\r\n'
-        prcPattern = r'( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+)\r\n'
+        prcPattern = r'(( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+))\r\n'
         prcs = []
+        dQryProcess = self.queryProcess(appc)
+        self.markProcStatus(dQryProcess)
         for cmd in self.reCmd.aCmds:
+            if cmd[:5] == 'query':
+                continue
             logging.info('exec: %s', cmd)
             # time.sleep(1)
-            appc.sendline(cmd)
-            # time.sleep(1)
-            if cmd == 'query': prcs = []
-            i = appc.expect([prcPattern, self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
-            flog1.write('match %d' % i)
-            flog1.write(appc.before)
-            if i <2:
-                flog1.write(appc.match.group())
-            flog1.write(appc.buffer)
-            while i == 0:
-                appPrc = appc.match.group()
-                print(appPrc)
-                prcs.append(appPrc)
-                flog1.write(appPrc)
-                i = appc.expect([prcPattern, self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
-            if i > 1:
-                return
+            # print('send cmd: %s' % cmd)
+            aCmdProcess = self.makeCmdProcess(cmd)
+            for cmdProc in aCmdProcess:
+                print('(%s)%s' % (self.host.hostName, cmdProc))
+                appc.sendline(cmdProc)
+                i = appc.expect([self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
+            # print('check process after %s:' % cmd)
+            dDoneProcess = self.checkResult(cmd, appc)
 
+            self.markProcStatus(dDoneProcess)
+            # time.sleep(1)
             # logging.info('exec: %s', appc.before)
         appc.sendline('exit')
         i = appc.expect(['GoodBye\!\!', pexpect.TIMEOUT, pexpect.EOF])
@@ -277,41 +287,133 @@ class AcConsole(threading.Thread):
         flog2.close()
         # flog.write(prcs)
 
-    def doSu(self, clt, suCmd, pwd, auto_prompt_reset=True):
-        clt.sendline(suCmd)
-        i = clt.expect([u'密码：', 'Password:',pexpect.TIMEOUT,pexpect.EOF])
-        if i==0 or i==1:
-            clt.sendline(pwd)
-            i = clt.expect(["su: 鉴定故障", r"[#$]", pexpect.TIMEOUT])
+    def sendCmds(self, acs, aCmd):
+        for cmdProc in aCmd:
+            print('(%s)%s' % (self.host.hostName, cmdProc))
+            acs.sendline(cmdProc)
+            i = acs.expect([self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
+
+    def makeCmdProcess(self, cmd):
+        aCmdProc = []
+        if cmd == 'query':
+            return [cmd]
+        if self.objType == 'h':
+            cmdProc = '%sall' % cmd
+            aCmdProc.append(cmdProc)
         else:
-            clt.close()
-            # raise pexpect.ExceptionPxssh('unexpected su response ')
-            return False
-        if i==1:
-            pass
+            for prc in self.aProcess:
+                cmdProc = '%s %s' % (cmd, prc[2])
+                aCmdProc.append(cmdProc)
+        return aCmdProc
+
+    def checkResult(self, cmd, acs):
+        if cmd[:5] == 'start':
+            return self.checkStart(acs)
+        elif cmd[:5] == 'shutd':
+            return self.checkDown(acs)
+
+    def checkStart(self, acs):
+        aBaseProc = []
+        if self.objType == 'h':
+            aBaseProc = self.aHostProcess
         else:
-            clt.close()
-            raise pexpect.ExceptionPxssh('unexpected login response')
-        if auto_prompt_reset:
-            if not clt.set_unique_prompt():
-                clt.close()
-                raise pexpect.ExceptionPxssh('could not set shell prompt '
-                                     '(received: %r, expected: %r).' % (
-                                         clt.before, clt.PROMPT,))
-        return True
+            aBaseProc = self.aProcess
+        dCheckProc = {}
+        for i in range(self.queryNum):
+            dCheckProc = self.queryProcess(acs)
+            self.printDicInfo(dCheckProc)
+            unRun = 0
+            for proc in aBaseProc:
+                prcName = proc[1]
+                if prcName not in dCheckProc:
+                    unRun = 1
+                    break
+            if unRun == 1:
+                time.sleep(60)
+                continue
+            else:
+                break
+        return dCheckProc
+
+    def checkDown(self, acs):
+        dCheckProc = {}
+        for i in range(self.queryNum):
+            dCheckProc = self.queryProcess(acs)
+            if self.objType == 'h':
+                if len(dCheckProc) == 0:
+                    return dCheckProc
+                else:
+                    time.sleep(60)
+                    continue
+            for proc in self.aProcess:
+                prcName = proc[1]
+                # prcName = prcAcName.split('|')[2]
+                prcIsRun = 0
+                if prcName in dCheckProc:
+                    prcIsRun = 1
+                    break
+            if prcIsRun == 1:
+                time.sleep(60)
+                continue
+            else:
+                break
+        return dCheckProc
+
+    def queryProcess(self, acs):
+        # print('query')
+        print('(%s)%s' % (self.host.hostName, 'query'))
+        acs.sendline('query')
+        # aHostProc = self.aHostProcess
+        dQryProcess = {}
+        i = acs.expect([self.reCmd.prcPattern, self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
+        while i == 0:
+            appPrc = acs.match.group(1)
+            procIndx = acs.match.group(2)
+            procApp = acs.match.group(3)
+            procType = acs.match.group(4)
+            procName = acs.match.group(5)
+            dQryProcess[procName] = [procIndx, procApp, procType]
+            # print(appPrc)
+            i = acs.expect([self.reCmd.prcPattern, self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
+        return dQryProcess
+
+    def markProcStatus(self, dProc):
+        dMarked = {}
+        if not dProc:
+            for proc in self.aHostProcess:
+                proc.append('0')
+            return
+        for proc in self.aHostProcess:
+            procName = proc[1]
+            if procName in dProc:
+                qryProc = dProc[procName]
+                if procName == proc[2]:
+                    procAcName = '%s|%s|%s' % (qryProc[1], qryProc[2], procName)
+                    proc[2] = procAcName
+                proc.append(qryProc[0])
+                dMarked[procName] = qryProc
+            else:
+                proc.append('0')
+        for pName in dProc:
+            if pName in dMarked:
+                continue
+            else:
+                procInfo = [self.host.hostName,pName,pName,None,dProc[pName][0]]
+                self.aHostProcess.append(procInfo)
 
     def suExit(self, clt):
         clt.sendline('exit')
         clt.prompt()
 
-    def printInfo(self):
-        pass
+    def printDicInfo(self, dict):
+        for k in dict:
+            logging.info('%s %s' % (k,dict[k]))
 
 class AcBuilder(object):
     sqlHost = "select machine_name,rpc_ip,rpc_port,time_out from rpc_register where app_name='appControl' and state=1 order by machine_name"
     sqlNet = "select process_name,ip,net_code from ps_proxy_route where state=1"
     # sqlProcess = "select process_name,ip,net_code from ps_proxy_route where state=1"
-    sqlProcess = "select m.machine_name,r.ip,m.process_name,r.net_code from sys_machine_process m, ps_proxy_route r where m.state=1 and m.process_name=r.process_name(+) order by m.machine_name,m.sort"
+    sqlProcess = "select m.machine_name,m.process_name,m.process_name,r.net_code,m.sort from sys_machine_process m, ps_proxy_route r where m.state=1 and m.process_name=r.process_name(+) order by m.machine_name,m.sort"
     def __init__(self, main):
         self.main = main
         self.group = main.group
@@ -319,6 +421,7 @@ class AcBuilder(object):
         self.conn = self.main.conn
         self.dHosts = {}
         self.dProcess = {}
+        self.dAllProcess = {}
         self.acCmd = None
         self.aAcCons = []
         # self.dest = dest
@@ -327,26 +430,15 @@ class AcBuilder(object):
         logging.info('create cmd ')
         main = self.main
         cmd = AcCmd()
-        if main.objType == 'h':
-            if main.cmd == 'r':
-                cmd.addCmd('shutdownall')
-                cmd.addCmd('startupall')
-            elif main.cmd == 's':
-                cmd.addCmd('startupall')
-            elif main.cmd == 'd':
-                cmd.addCmd('shutdownall')
-            elif main.cmd == 'q':
-                cmd.addCmd('query')
-        else:
-            if main.cmd == 'r':
-                cmd.addCmd('shutdown')
-                cmd.addCmd('startup')
-            elif main.cmd == 's':
-                cmd.addCmd('startup')
-            elif main.cmd == 'd':
-                cmd.addCmd('shutdown')
-            elif main.cmd == 'query':
-                cmd.addCmd('query')
+        if main.cmd == 'r':
+            cmd.addCmd('shutdown')
+            cmd.addCmd('startup')
+        elif main.cmd == 's':
+            cmd.addCmd('startup')
+        elif main.cmd == 'd':
+            cmd.addCmd('shutdown')
+        elif main.cmd == 'q':
+            cmd.addCmd('query')
 
         # cmd.addCmd('query')
         self.acCmd = cmd
@@ -355,21 +447,40 @@ class AcBuilder(object):
     def buildAcConsole(self):
         logging.info('create remote appc ')
         for hostName in self.dProcess:
-            print(hostName)
+            logging.info(hostName)
+            aProcess = self.dProcess[hostName]
+            aHostProcess = self.dAllProcess[hostName]
             # hostName = self.dProcess[process][0]
             host = self.dHosts[hostName]
-            acCons = AcConsole(self.acCmd, host, self.main.logPre)
+            cmd = copy.deepcopy(self.acCmd)
+            # cmdProc = self.makeCmdProcess(cmd, aProcess)
+            logging.info(cmd)
+            acCons = AcConsole(cmd, main.objType, host, aHostProcess, aProcess, self.main.logPre)
             self.aAcCons.append(acCons)
         return self.aAcCons
 
-    def printAllProcess(self):
-        for host in self.dProcess:
-            print(self.dProcess[host])
+    def printProcess(self, dProcess):
+        sProcessStatus = ''
+        for host in sorted(dProcess):
+            aProcess = dProcess[host]
+            strHostProc = '%s process %d:' % (host, len(aProcess))
+            sProcessStatus = '%s%s%s' % (sProcessStatus, os.linesep, strHostProc)
+            # print(strHostProc)
+            for proc in aProcess:
+                n = len(proc) - 1
+                str = '%s\t' * n
+                procStatus = proc[4:]
+                procStatus.extend(proc[1:4])
+                out = str % tuple(procStatus)
+                # aProcessStatus.append(out)
+                sProcessStatus = '%s%s%s' % (sProcessStatus, os.linesep, out)
+                # print(out)
+        return sProcessStatus
 
     def printAllHost(self):
         for hostName in self.dHosts:
             host = self.dHosts[hostName]
-            print('%s %s %s %s' % (host.hostName, host.hostIp, host.port, host.timeOut))
+            logging.info('%s %s %s %s', host.hostName, host.hostIp, host.port, host.timeOut)
 
     def loadProcess(self):
         # dProcess = {}
@@ -393,7 +504,7 @@ class AcBuilder(object):
         elif main.objType == 'p':
             aProcess = main.obj.split(',')
             aProcName = self.parseProcess(aProcess)
-        if not main.host:
+        if main.host:
             if main.host == 'a':
                 aHosts = None
             else:
@@ -401,26 +512,34 @@ class AcBuilder(object):
         for row in rows:
             host = row[0]
             processName = row[2]
+            acProcess = row[2]
             netName = row[3]
+            procSort = row[4]
+            acProcInfo = list(row)
             if aHosts:
                 if host not in aHosts:
                     continue
+            if host in self.dAllProcess:
+                self.dAllProcess[host].append(acProcInfo)
+            else:
+                self.dAllProcess[host] = [acProcInfo]
+
             if aProcess:
                 if processName not in aProcName:
                     continue
                 else:
-                    row[2] = self.getProcess(processName, aProcess)
+                    acProcInfo[2] = self.getProcess(processName, aProcess)
             if aNets:
                 if netName not in aNets:
                     continue
                 else:
-                    row[2] = '%s%s' % ('app_ne|busicomm|', processName)
+                    acProcInfo[2] = '%s%s' % ('app_ne|busicomm|', processName)
 
-            print(row)
+            # acProcInfo = [host, row[1], acProcess, netName, procSort]
             if host in self.dProcess:
-                self.dProcess[host].append(row)
+                self.dProcess[host].append(acProcInfo)
             else:
-                self.dProcess[host] = [row]
+                self.dProcess[host] = [acProcInfo]
         return self.dProcess
 
     def parseProcess(self, acProcess):
@@ -444,15 +563,6 @@ class AcBuilder(object):
         cur.close()
         for row in rows:
             self.dHosts[row[0]] = KtHost(*row)
-        # dHosts['skt2'] = ReHost('skt2', '10.4.72.67', '15200')
-        # dHosts['skt3'] = ReHost('skt3', '10.4.72.68', '15200')
-        # dHosts['skt4'] = ReHost('skt4', '10.4.72.69', '15200')
-        # dHosts['skt5'] = ReHost('skt5', '10.4.72.70', '15200')
-        # dHosts['skt6'] = ReHost('skt6', '10.4.72.71', '15200')
-        # dHosts['skt7'] = ReHost('skt7', '10.4.72.72', '15200')
-        # dHosts['skt8'] = ReHost('skt8', '10.4.72.73', '15200')
-        # dHosts['skt9'] = ReHost('skt9', '10.4.72.74', '15200')
-        # dHosts['skt10'] = ReHost('skt10', '10.4.72.75', '15200')
         return self.dHosts
 
     def startAll(self):
@@ -577,22 +687,39 @@ class Director(object):
     def start(self):
         appcmd = self.builder.buildCmd()
         # localIp = self.factory.getLocalIp()
-        print(appcmd)
+        logging.info(appcmd)
         dHosts = self.builder.loadHosts()
         dProcess = self.builder.loadProcess()
-        self.builder.printAllProcess()
+        logging.info('handling host:')
         self.builder.printAllHost()
+        logging.info('all process:')
+        aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
+        logging.info(aProcessStatus )
+        logging.info('handling process:')
+        aProcessStatus = self.builder.printProcess(dProcess)
+        logging.info(aProcessStatus)
+
         localHost = socket.gethostname()
         aAcCons = self.builder.buildAcConsole()
         # self.builder.printAllProcess()
-        procNum = len(aAcCons)
+        acNum = len(aAcCons)
         for ac in aAcCons:
+            logging.info(ac.host)
             ac.start()
 
         for ac in aAcCons:
             ac.join()
             logging.info('host %s cmd completed.', ac.host.hostName)
-        logging.info('all %d remotesh completed.', procNum)
+        logging.info('all cmd done, process status:')
+        aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
+        print(aProcessStatus)
+        self.printOut(aProcessStatus)
+        logging.info('all %d remotesh completed.', acNum)
+
+    def printOut(self, sMsg):
+        fOut = open(self.builder.main.outFile, 'w')
+        fOut.write(sMsg)
+        fOut.close()
 
 
 class Main(object):
@@ -675,15 +802,18 @@ class Main(object):
         print('   r  restartup')
         print('   s  startup')
         print('   d  shutdown')
-        print('   q  query')
+        print('   q  query(default)')
         print('-t h/n/p   command object type')
-        print('   h  host')
+        print('   h  host(default)')
         print('   n  network element')
         print('   p  process')
         print('-h a/KTNEW_01,KTNEW_02   hosts ')
-        print('   a  all hosts')
+        print('   a  all hosts(default)')
         print('   KTNEW_01,KTNEW_02  some hosts')
         print "example:  %s %s" % (self.baseName,' -c r -t h -h a ')
+        print "\t%s %s" % (self.baseName, ' -c r')
+        print "\t%s %s" % (self.baseName, ' -c d -t n VOLTE_AS')
+        print "\t%s %s" % (self.baseName, " -c s -t p 'app_dispatcher|dispatcher|dispatch_proc_A110'")
         exit(1)
 
     def openFile(self, fileName, mode):
