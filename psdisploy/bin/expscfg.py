@@ -278,49 +278,48 @@ class CfgExport(object):
     def __init__(self, main):
         self.main = main
         self.conn = main.conn
-        self.file = main.outFile
+        self.outFile = main.outFile
         self.expTalbes = None
         self.dbInfo = None
-        self.cfgVersion = None
-        self.pubDesc = None
+        self.curVersion = None
+        self.curDesc = None
 
-        self.remoteDir = main.remoteDir
-        self.outFile = main.outFile
-        # self.aHost = []
-        self.dHosts = {}
-        self.aHostStatus = []
-        self.aDistStatus = []
-        self.succ = []
-        self.fail = []
         self.fResult = None
 
-    def prepareExp(self):
-
+    def getCurVersion(self):
         cur = self.conn.prepareSql(self.sqlCfgVer)
         self.conn.executeCur(cur, None),
         versInfo = self.conn.fetchone(cur)
-        self.cfgVersion = versInfo[0]
-        self.pubDesc = versInfo[1]
+        self.curVersion = versInfo[0]
+        self.curDesc = versInfo[1]
+        cur.close()
+
+    def prepareExp(self):
+        self.getCurVersion()
         self.expTalbes = self.main.cfg.loadCfgTable()['cfgtable']
-        self.file = '%s_%s_%s.dmp' % (self.file, self.cfgVersion, self.main.nowtime)
+        self.outFile = '%s_%s_%s.dmp' % (self.outFile, self.curVersion, self.main.nowtime)
         self.dbInfo = '%s/%s@%s' % (self.conn.dbInfo['dbusr'], self.conn.dbInfo['dbpwd'], self.conn.dbInfo['tns'])
-        logging.info('export ps_cfg version: %s.', self.cfgVersion)
-        logging.info('pub_desc: %s', self.pubDesc)
-        logging.info('exp tables: %s', self.expTalbes)
-        logging.info('export file: %s', self.file)
-        print('export ps_cfg version: %s.' % self.cfgVersion)
-        print('pub_desc: %s' % self.pubDesc)
-        print('export file: %s' % self.file)
-        print('exp tables: %s' % self.expTalbes)
 
     def export(self):
-        self.prepareExp()
-        cmd = 'exp %s tables=%s file=%s' % (self.dbInfo, self.expTalbes, self.file)
+        cmd = 'exp %s tables=%s file=%s' % (self.dbInfo, self.expTalbes, self.outFile)
         # print(cmd)
+        logging.info(cmd)
         (outStr, exitSts) = pexpect.run(cmd, timeout=300, withexitstatus=1)
         # print(exitSts)
         print(outStr)
         logging.info(outStr)
+
+    def start(self):
+        self.prepareExp()
+        logging.info('current ps_cfg version: %s.', self.curVersion)
+        logging.info('pub_desc: %s', self.curDesc)
+        logging.info('exp tables: %s', self.expTalbes)
+        logging.info('export file: %s', self.outFile)
+        print('export ps_cfg version: %s.' % self.curVersion)
+        print('pub_desc: %s' % self.curDesc)
+        print('export file: %s' % self.outFile)
+        print('exp tables: %s' % self.expTalbes)
+        self.export()
 
 
 class Main(object):
@@ -422,7 +421,7 @@ class Main(object):
         self.cfg.loadDbinfo()
         self.connectServer()
         exporter = CfgExport(main)
-        exporter.export()
+        exporter.start()
 
 
 if __name__ == '__main__':

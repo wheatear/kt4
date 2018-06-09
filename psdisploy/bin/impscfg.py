@@ -32,56 +32,61 @@ import expscfg
 class CfgImport(expscfg.CfgExport):
     sqlCfgVer = "select version_id,pub_describe from PS_V_CFG_CUR"
     def __init__(self, main):
-        self.main = main
-        self.conn = main.conn
-        self.file = main.outFile
-        self.expTalbes = None
-        self.dbInfo = None
-        self.cfgVersion = None
-        self.pubDesc = None
+        super(self.__class__, self).__init__(main)
+        self.inFile = main.outFile
+        self.lastVersion = None
+        self.lastDesc = None
 
-        self.remoteDir = main.remoteDir
-        self.outFile = main.outFile
-        # self.aHost = []
-        self.dHosts = {}
-        self.aHostStatus = []
-        self.aDistStatus = []
-        self.succ = []
-        self.fail = []
-        self.fResult = None
+    def getCurVersion(self):
+        self.lastVersion = self.curVersion
+        self.lastDesc = self.curDesc
+        super(self.__class__, self).getCurVersion()
 
-    def prepareExp(self):
+    def backCfg(self):
+        logging.info('backup cur ps cfg')
+        # print('backup cur ps cfg')
+        super(self.__class__, self).export()
 
-        cur = self.conn.prepareSql(self.sqlCfgVer)
-        self.conn.executeCur(cur, None),
-        versInfo = self.conn.fetchone(cur)
-        self.cfgVersion = versInfo[0]
-        self.pubDesc = versInfo[1]
-        self.expTalbes = self.main.cfg.loadCfgTable()['cfgtable']
-        self.file = '%s_%s_%s.dmp' % (self.file, self.cfgVersion, self.main.nowtime)
-        self.dbInfo = '%s/%s@%s' % (self.conn.dbInfo['dbusr'], self.conn.dbInfo['dbpwd'], self.conn.dbInfo['tns'])
-        logging.info('export ps_cfg version: %s.', self.cfgVersion)
-        logging.info('pub_desc: %s', self.pubDesc)
-        logging.info('exp tables: %s', self.expTalbes)
-        logging.info('export file: %s', self.file)
-        print('export ps_cfg version: %s.' % self.cfgVersion)
-        print('pub_desc: %s' % self.pubDesc)
-        print('export file: %s' % self.file)
-        print('exp tables: %s' % self.expTalbes)
+    def truncCfg(self):
+        logging.info('truncate old ps_cfg %s', self.expTalbes)
+        aTables = self.expTalbes.split(',')
+        sqlTpl = 'truncate table %s'
+        for tab in aTables:
+            sql = sqlTpl % tab
+            logging.info(sql)
+            print(sql)
+            cur = self.conn.prepareSql(self.sqlCfgVer)
+            self.conn.executeCur(cur, None),
+            cur.close()
 
-    def export(self):
-        self.prepareExp()
-        cmd = 'exp %s tables=%s file=%s' % (self.dbInfo, self.expTalbes, self.file)
+    def importCfg(self):
+        cmd = 'imp %s file=%s full=y ignore=y' % (self.dbInfo, self.inFile)
         # print(cmd)
+        logging.info(cmd)
         (outStr, exitSts) = pexpect.run(cmd, timeout=300, withexitstatus=1)
         # print(exitSts)
         print(outStr)
         logging.info(outStr)
 
     def start(self):
+        self.prepareExp()
+        logging.info('before import current ps_cfg version: %s', self.curVersion)
+        logging.info('desc : %s', self.curDesc)
+        print('backup current ps_cfg')
         self.backCfg()
+        print('truncat old ps_cfg')
         self.truncCfg()
+        print('import new ps_cfg from file: %s' % self.inFile)
         self.importCfg()
+        self.prepareExp()
+        logging.info('after import last ps_cfg version: %s', self.lastVersion)
+        logging.info('desc : %s', self.lastDesc)
+        logging.info('after import current ps_cfg version: %s', self.curVersion)
+        logging.info('desc : %s', self.curDesc)
+        print('after import last ps_cfg version: %s' % self.lastVersion)
+        print('desc : %s' % self.lastDesc)
+        print('after import current ps_cfg version: %s' % self.curVersion)
+        print('desc : %s' % self.curDesc)
 
 
 class Main(object):
@@ -116,6 +121,7 @@ class Main(object):
         self.dirLib = os.path.join(self.dirApp, 'lib')
         self.dirInput = os.path.join(self.dirApp, 'input')
         self.dirOutput = os.path.join(self.dirApp, 'output')
+        self.dirBackup = os.path.join(self.dirApp, 'backup')
 
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
@@ -128,7 +134,7 @@ class Main(object):
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
-        self.outFile = os.path.join(self.dirOutput, outFilePre)
+        self.outFile = os.path.join(self.dirBackup, outFilePre)
 
     def checkArgv(self):
         appName = os.path.basename(self.Name)
