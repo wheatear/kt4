@@ -224,7 +224,20 @@ class DbConn(object):
                 cur.execute(None, params)
         except orcl.DatabaseError, e:
             logging.error('execute sql err %s:%s ', e, cur.statement)
+            print('error: %s' % e)
             return None
+        return cur
+
+    def executeSql(self, sql):
+        logging.info('execute sql %s', sql)
+        cur = self.conn.cursor()
+        try:
+            cur.execute(sql)
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            print('error: %s' % e)
+            return None
+        # cur.close()
         return cur
 
     def fetchmany(self, cur):
@@ -297,7 +310,7 @@ class CfgExport(object):
     def prepareExp(self):
         self.getCurVersion()
         self.expTalbes = self.main.cfg.loadCfgTable()['cfgtable']
-        self.outFile = '%s_%s_%s.dmp' % (self.outFile, self.curVersion, self.main.nowtime)
+        self.outFile = '%s_%s_%s_%s.dmp' % (self.outFile, self.conn.dbInfo['dbsid'], self.curVersion, self.main.nowtime)
         self.dbInfo = '%s/%s@%s' % (self.conn.dbInfo['dbusr'], self.conn.dbInfo['dbpwd'], self.conn.dbInfo['tns'])
 
     def export(self):

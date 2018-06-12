@@ -33,7 +33,8 @@ class CfgImport(expscfg.CfgExport):
     sqlCfgVer = "select version_id,pub_describe from PS_V_CFG_CUR"
     def __init__(self, main):
         super(self.__class__, self).__init__(main)
-        self.inFile = main.outFile
+        self.inFile = main.inFile
+        # self.outFile = main.backFile
         self.lastVersion = None
         self.lastDesc = None
 
@@ -55,8 +56,7 @@ class CfgImport(expscfg.CfgExport):
             sql = sqlTpl % tab
             logging.info(sql)
             print(sql)
-            cur = self.conn.prepareSql(self.sqlCfgVer)
-            self.conn.executeCur(cur, None),
+            cur = self.conn.executeSql(sql)
             cur.close()
 
     def importCfg(self):
@@ -72,7 +72,7 @@ class CfgImport(expscfg.CfgExport):
         self.prepareExp()
         logging.info('before import current ps_cfg version: %s', self.curVersion)
         logging.info('desc : %s', self.curDesc)
-        print('backup current ps_cfg')
+        print('backup current ps_cfg: %s', self.outFile)
         self.backCfg()
         print('truncat old ps_cfg')
         self.truncCfg()
@@ -94,7 +94,7 @@ class Main(object):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
         self.conn = None
-        self.souFile = None
+        self.inFile = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -129,19 +129,20 @@ class Main(object):
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.appNameBody, self.today)
         logNamePre = '%s_%s' % (self.appNameBody, self.today)
-        outFilePre = '%s_%s' % ('pscfg', self.hostName)
+        backFilePre = '%s_%s' % ('pscfg', self.hostName)
 
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
-        self.outFile = os.path.join(self.dirBackup, outFilePre)
+        self.inFile = os.path.join(self.dirInput, self.inFile)
+        self.outFile = os.path.join(self.dirBackup, backFilePre)
 
     def checkArgv(self):
         appName = os.path.basename(self.Name)
         self.appName = appName
-        # if self.argc < 3:
-        #     self.usage()
-        # self.souFile = sys.argv[1]
+        if self.argc < 2:
+            self.usage()
+        self.inFile = sys.argv[1]
         # self.user = sys.argv[2]
         # if self.argc > 2:
         #     self.remoteDir = sys.argv[3]
@@ -181,8 +182,8 @@ class Main(object):
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
-        print('outfile: %s' % self.outFile)
-        logging.info('outfile: %s', self.outFile)
+        print('backfile: %s' % self.outFile)
+        logging.info('backfile: %s', self.outFile)
 
         self.cfg.loadDbinfo()
         self.connectServer()
