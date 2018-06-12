@@ -273,8 +273,17 @@ class AcConsole(threading.Thread):
             for cmdProc in aCmdProcess:
                 print('(%s)%s' % (self.host.hostName, cmdProc))
                 appc.sendline(cmdProc)
-                i = appc.expect([self.reCmd.prompt, pexpect.TIMEOUT, pexpect.EOF])
+                i = appc.expect([self.reCmd.prompt, r'RESULT:FALSE:', pexpect.TIMEOUT, pexpect.EOF])
+                iResend = 0
+                while i == 1:
+                    iResend += 1
+                    if iResend > 5:
+                        break
+                    time.sleep(60)
+                    appc.sendline(cmdProc)
+                    i = appc.expect([self.reCmd.prompt, r'RESULT:FALSE:', pexpect.TIMEOUT, pexpect.EOF])
             # print('check process after %s:' % cmd)
+            time.sleep(60)
             dDoneProcess = self.checkResult(cmd, appc)
 
             self.markProcStatus(dDoneProcess)
