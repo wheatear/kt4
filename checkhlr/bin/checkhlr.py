@@ -14,7 +14,6 @@ import getopt
 import cx_Oracle as orcl
 import socket
 import glob
-# import hostdirs
 from multiprocessing.managers import BaseManager
 import pexpect
 import pexpect.pxssh
@@ -389,24 +388,6 @@ class KtClient(object):
         rspMsg = self.tcpClt.recv()
         # logging.debug(rspMsg)
         return rspMsg
-
-
-class AcCmd(object):
-    def __init__(self):
-        self.cmd = r'appControl -c %s:%s'
-        self.prompt = r'\(ac console\)# '
-        self.prcPattern = r'(( ?\d{1,2})\t(app_\w+)\|(\w+)\|(\w+))\r\n'
-        self.aCmds = []
-        # self.hosts = []
-
-    def addCmd(self, cmdStr):
-        self.aCmds.append(cmdStr)
-
-    def __str__(self):
-        str = '%s\n' % self.cmd
-        for cmd in self.aCmds:
-            str = '%s%s\n' % (str,cmd)
-        return str
 
 
 class AcConsole(threading.Thread):
