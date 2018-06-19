@@ -218,33 +218,38 @@ class CheckRead(threading.Thread):
     def __init__(self, builder):
         threading.Thread.__init__(self)
         self.main = builder.main
+        self.conn = self.main.conn
         self.aFiles = builder.aFiles
         self.dFiles = builder.dFiles
         self.kt = builder.kt
         self.orderQueue = builder.orderQueue
+        self.curPsid = self.conn.prepareSql(self.sqlPsid)
 
     def loadPsId(self):
         sql = self.sqlPsid
         para = None
-        cur = self.main.conn.prepareSql(sql)
-        self.main.conn.executeCur(cur, para)
-        row = self.conn.fetone(cur)
+        # cur = self.conn.prepareSql(sql)
+        self.conn.executeCur(self.curPsid, para)
+        row = self.conn.fetchone(self.curPsid)
         psId = row[0]
         return psId
 
     def run(self):
         for fi in self.aFiles:
+            i = 0
             fp = self.main.openFile(fi, 'r')
             for line in fp:
-                for i in range(200):
-                    if i == 199:
-                        if self.orderQueue.qsize() > 1000:
-                            time.sleep(10)
-                    tradeId = self.loadPsId()
-                    msisdn = line[1]
-                    order = line.split(tradeId, msisdn, line, fi)
-                    self.orderQueue.put(order, 1)
-                    self.kt.syncSendOne(order)
+                i += 1
+                if i > 199:
+                    i = 0
+                    if self.orderQueue.qsize() > 1000:
+                        time.sleep(10)
+                tradeId = self.loadPsId()
+                aMsisdn = line.split()
+                msisdn = aMsisdn[1]
+                order = KtOrder(tradeId, msisdn, line, fi)
+                self.orderQueue.put(order, 1)
+                self.kt.syncSendOne(order)
             fp.close()
 
 
@@ -257,6 +262,7 @@ class CheckWrite(threading.Thread):
         self.kt = builder.kt
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
+        self.doneFile = {}
 
     # def openWorkFile(self):
     #     # sucName = self.d
@@ -264,13 +270,42 @@ class CheckWrite(threading.Thread):
     #     pass
 
     def run(self):
+        for file in self.dFiles:
+            self.doneFile[file] = 0
         while 1:
+            # if self.orderQueue.empty():
+            #     time.sleep(30)
+            #     continue
+            order = None
             if not self.orderQueue.empty():
                 order = self.orderQueue.get(1)
-                self.dOrder[order.tradId] = order
+                self.dOrder[order.tradeId] = order
+                logging.debug('get order %d from queue', order.tradeId)
             orderRsp = self.kt.syncRecv()
-            tradeId = orderRsp[0]
-            order = self.dOrder.pop(tradeId)
+            logging.debug(orderRsp)
+            tradeId = int(orderRsp[0])
+            logging.debug('get order %d from socket', tradeId)
+
+            while tradeId not in self.dOrder:
+                order = self.orderQueue.get(1)
+                self.dOrder[order.tradeId] = order
+                logging.debug('get order %d from queue', order.tradeId)
+            order = None
+            if tradeId in self.dOrder:
+                order = self.dOrder.pop(tradeId)
+            else:
+                # time.sleep(10)
+                continue
+            inFile = order.file
+            fp = self.dFiles[inFile][6]
+            logging.debug('write %d to rsp file', tradeId)
+            fp.write('%s%s' % (order.line, os.linesep))
+            self.doneFile[inFile] += 1
+            if self.doneFile[inFile] == self.dFiles[inFile][1]:
+                logging.info('file %s completed after process %d lines.', inFile, self.doneFile[inFile])
+                self.dFiles.pop(inFile)
+            if len(self.dFiles) == 0:
+                break
 
 
 class SubCheck(object):
@@ -284,11 +319,11 @@ class SubCheck(object):
 
 
 class TcpClt(object):
-    def __init__(self, host, port, bufSize=1024):
+    def __init__(self, host, port, bufSize=5120):
         self.addr = (host, port)
         self.bufSize = bufSize
         try:
-            tcpClt = socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcpClt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             tcpClt.connect(self.addr)
         except Exception, e:
             print 'Can not create socket to %s:%s. %s' % (host, port, e)
@@ -303,10 +338,12 @@ class TcpClt(object):
 
     def recv(self):
         rspHead = self.tcpClt.recv(12)
+        logging.debug('recv head: %s', rspHead)
         lenHead = len(rspHead)
         while lenHead < 12:
             lenLast = 12 - lenHead
             rspHead = '%s%s' % (rspHead, self.tcpClt.recv(lenLast))
+            logging.debug('loop recv head: %s', rspHead)
             lenHead = len(rspHead)
         logging.debug('recv package head:%s', rspHead)
         rspLen = int(rspHead[0:8])
@@ -329,6 +366,7 @@ class KtClient(object):
         self.syncServer = ip
         self.syncPort = port
         self.tcpClt = None
+        self.connTcpServer()
 
     def getSyncOrderInfo(self):
         cur = self.ktClient.conn.cursor()
@@ -336,9 +374,9 @@ class KtClient(object):
         cur.execute(sql)
         result = cur.fetchone()
         if result:
-            self.tradId = result[0]
+            self.tradeId = result[0]
         cur.close()
-        logging.debug('load tradId: %d', self.tradId)
+        logging.debug('load tradeId: %d', self.tradeId)
 
     def connTcpServer(self):
         if self.tcpClt: return self.tcpClt
@@ -346,7 +384,7 @@ class KtClient(object):
 
     def syncSendOne(self, order):
         reqMsg = 'TRADE_ID=%d;ACTION_ID=1;PS_SERVICE_TYPE=HLR;DISP_SUB=4;MSISDN=%s;IMSI=111111111111111' % (
-        order.tradId, order.msisdn)
+        order.tradeId, order.msisdn)
         # logging.debug('send order num:%d , order name:%s', order.ktCase.psNo, order.ktCase.psCaseName)
         logging.debug(reqMsg)
         self.tcpClt.send(reqMsg)
@@ -365,12 +403,13 @@ class KtClient(object):
 
     def syncRecv(self):
         # '00000076RSP:TRADE_ID=2287919;ERR_CODE=-1;ERR_DESC=????????????!'
-        logging.info('receive %s synchrous orders response...', self.ktName)
+        logging.info('receive %s synchrous orders response...', 'kt')
         # orderNum = self.ordGroup.orderNum
         regx = re.compile(r'RSP:TRADE_ID=(\d+);ERR_CODE=(.+?);ERR_DESC=([^;]*);(.*)')
         # i = 0
         # while i < orderNum:
         rspMsg = self.recvResp()
+        logging.debug(rspMsg)
         m = regx.search(rspMsg)
         orderRsp = None
         if m is not None:
@@ -380,7 +419,7 @@ class KtClient(object):
             resp = m.group(4)
 
             orderRsp = [tridId, errCode, errDesc, resp]
-            logging.debug('recv order response ,tradId:%s, syncStatus:%d, syncDesc:%s, response:%s.', tridId,
+            logging.debug('recv order response ,tradeId:%s, syncStatus:%d, syncDesc:%s, response:%s.', tridId,
                           errCode, errDesc, resp)
         return orderRsp
 
@@ -585,7 +624,7 @@ class AcConsole(threading.Thread):
             logging.info('%s %s' % (k,dict[k]))
 
 class Builder(object):
-    sqlSyncServ = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort'"
+    sqlSyncServ = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort' and b.state=1"
 
     def __init__(self, main, checkFile):
         self.main = main
@@ -632,7 +671,11 @@ class Builder(object):
         cur = self.conn.prepareSql(sql)
         self.conn.executeCur(cur, para)
         rows = self.conn.fetchall(cur)
-        self.kt = KtClient(rows[0][1], rows[0][2])
+        ip = rows[0][1]
+        port = rows[0][2]
+        cur.close()
+        logging.info('server ip: %s  port: %s', ip ,port)
+        self.kt = KtClient(ip, port)
         return self.kt
 
     def buildQueue(self):
@@ -644,7 +687,7 @@ class Builder(object):
         return checkReader
 
     def buildCheckWrite(self):
-        checkWriter = CheckWrite(self.aFiles, self.dFileSize, self.kt, self.orderQueue)
+        checkWriter = CheckWrite(self)
         return checkWriter
 
     def loadProcess(self):
@@ -846,40 +889,56 @@ class Director(object):
         self.shutDown = None
         self.fRsp = None
 
-    def saveOrderRsp(self, order):
-        self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
+    # def saveOrderRsp(self, order):
+    #     self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
 
     def start(self):
-        appcmd = self.builder.buildCmd()
-        # localIp = self.factory.getLocalIp()
-        logging.info(appcmd)
-        dHosts = self.builder.loadHosts()
-        dProcess = self.builder.loadProcess()
-        logging.info('handling host:')
-        self.builder.printAllHost()
-        logging.info('all process:')
-        aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
-        logging.info(aProcessStatus )
-        logging.info('handling process:')
-        aProcessStatus = self.builder.printProcess(dProcess)
-        logging.info(aProcessStatus)
+        self.builder.findFile()
+        self.builder.lineCount()
+        self.builder.buildKtClient()
+        queue = self.builder.buildQueue()
+        reader = self.builder.buildCheckRead()
+        writer = self.builder.buildCheckWrite()
 
-        localHost = socket.gethostname()
-        aAcCons = self.builder.buildAcConsole()
-        # self.builder.printAllProcess()
-        acNum = len(aAcCons)
-        for ac in aAcCons:
-            logging.info(ac.host)
-            ac.start()
+        logging.info('reader start.')
+        reader.start()
+        logging.info('writer start.')
+        writer.start()
 
-        for ac in aAcCons:
-            ac.join()
-            logging.info('host %s cmd completed.', ac.host.hostName)
-        logging.info('all cmd done, process status:')
-        aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
-        print(aProcessStatus)
-        self.printOut(aProcessStatus)
-        logging.info('all %d remotesh completed.', acNum)
+        reader.join()
+        logging.info('reader complete.')
+        writer.join()
+        logging.info('writer complete.')
+
+        # # localIp = self.factory.getLocalIp()
+        # logging.info(appcmd)
+        # dHosts = self.builder.loadHosts()
+        # dProcess = self.builder.loadProcess()
+        # logging.info('handling host:')
+        # self.builder.printAllHost()
+        # logging.info('all process:')
+        # aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
+        # logging.info(aProcessStatus )
+        # logging.info('handling process:')
+        # aProcessStatus = self.builder.printProcess(dProcess)
+        # logging.info(aProcessStatus)
+        #
+        # localHost = socket.gethostname()
+        # aAcCons = self.builder.buildAcConsole()
+        # # self.builder.printAllProcess()
+        # acNum = len(aAcCons)
+        # for ac in aAcCons:
+        #     logging.info(ac.host)
+        #     ac.start()
+        #
+        # for ac in aAcCons:
+        #     ac.join()
+        #     logging.info('host %s cmd completed.', ac.host.hostName)
+        # logging.info('all cmd done, process status:')
+        # aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
+        # print(aProcessStatus)
+        # self.printOut(aProcessStatus)
+        # logging.info('all %d remotesh completed.', acNum)
 
     def printOut(self, sMsg):
         fOut = open(self.builder.main.outFile, 'w')
@@ -993,7 +1052,7 @@ class Main(object):
 
         self.cfg.loadDbinfo()
         self.connectServer()
-        builder = Builder(self)
+        builder = Builder(self, self.checkFile)
         # remoteShell.loger = loger
         director = Director(builder)
         director.start()
