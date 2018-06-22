@@ -239,6 +239,9 @@ class CheckRead(threading.Thread):
             i = 0
             fp = self.main.openFile(fi, 'r')
             for line in fp:
+                line = line.strip()
+                if len(line) < 1:
+                    break
                 i += 1
                 if i > 199:
                     i = 0
@@ -343,7 +346,7 @@ class TcpClt(object):
         while lenHead < 12:
             lenLast = 12 - lenHead
             rspHead = '%s%s' % (rspHead, self.tcpClt.recv(lenLast))
-            logging.debug('loop recv head: %s', rspHead)
+            # logging.debug('loop recv head: %s', rspHead)
             lenHead = len(rspHead)
         logging.debug('recv package head:%s', rspHead)
         rspLen = int(rspHead[0:8])
@@ -675,7 +678,8 @@ class Builder(object):
         port = rows[0][2]
         cur.close()
         logging.info('server ip: %s  port: %s', ip ,port)
-        self.kt = KtClient(ip, port)
+        # self.kt = KtClient(ip, port)
+        self.kt = KtClient('10.7.5.164', '16101')
         return self.kt
 
     def buildQueue(self):
