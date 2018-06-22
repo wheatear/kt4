@@ -554,7 +554,9 @@ class KtPsClient(HttpShortClient):
         dVar = {'BILL_ID':order.dParam['BILL_ID']}
         self.conn.executeCur(cur, dVar)
         row = self.conn.fetchone(cur)
-        order.dParam['REGION_CODE'] = row[0]
+        order.dParam['REGION_CODE'] = '100'
+        if row:
+            order.dParam['REGION_CODE'] = row[0]
         for req in order.aReqMsg:
             req.cmdTmpl['REGION_CODE'] = order.dParam['REGION_CODE']
 
@@ -717,6 +719,50 @@ class FileFac(object):
             order.net = self.dNetClient[self.netCode]
             return order
         return None
+
+
+class HttpShortFFac(FileFac):
+    pass
+
+
+class KtPsFFac(FileFac):
+    def __init__(self, main):
+        super(self.__class__, self).__init__(main)
+        # self.respName = '%s_rsp' % os.path.basename(self.main.outFile)
+        # self.respFullName = self.respName
+        # self.conn = main.conn
+        # self.cmdTab = self.main.cmdFile
+
+    def loadCmd(self):
+        tmpl = None
+        tmplCmd = {}
+        i = 0
+        for line in self.main.fCmd:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            if line == '$END$':
+                if len(tmplCmd) > 0:
+                    i += 1
+                    tmplCmd['OLD_PS_ID'] = i
+                    tmplCmd['PS_MODEL_NAME'] = self.main.cmdFile
+                    logging.info(tmplCmd)
+                    tmpl = KtPsTmpl(tmplCmd)
+                    # logging.info(tmpl.aVariables)
+                    self.aCmdTemplates.append(tmpl)
+                    tmpl = None
+                    tmplCmd = {}
+                continue
+            if line == 'KT_REQUEST':
+                continue
+            aParam = line.split(' ', 1)
+            if len(aParam) < 1:
+                continue
+            tmplCmd[aParam[0]] = aParam[1]
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        self.main.fCmd.close()
 
 
 class TableFac(FileFac):
@@ -970,7 +1016,9 @@ class Main(object):
         # facName = '%sFac' % self.netType
         # fac_meta = getattr(self.appNameBody, facName)
         # fac = fac_meta(self)
-        fac = FileFac(self)
+        facName = '%sFFac' % self.netType
+        fac = createInstance(self.appNameBody, facName, self)
+        # fac = FileFac(self)
         return fac
 
     @staticmethod
