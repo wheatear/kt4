@@ -5,6 +5,7 @@
 
 import sys
 import os
+import shutil
 import time
 import copy
 import multiprocessing
@@ -241,11 +242,12 @@ class CheckRead(threading.Thread):
             for line in fp:
                 line = line.strip()
                 if len(line) < 1:
-                    break
+                    continue
                 i += 1
                 if i > 199:
                     i = 0
                     if self.orderQueue.qsize() > 1000:
+                        logging.info('order queue size exceed 1000, sleep 10')
                         time.sleep(10)
                 tradeId = self.loadPsId()
                 aMsisdn = line.split()
@@ -254,6 +256,8 @@ class CheckRead(threading.Thread):
                 self.orderQueue.put(order, 1)
                 self.kt.syncSendOne(order)
             fp.close()
+            logging.info('read %s complete, and delete.', fi)
+            os.remove(fi)
 
 
 class CheckWrite(threading.Thread):
@@ -266,24 +270,19 @@ class CheckWrite(threading.Thread):
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
         self.doneFile = {}
-
-    # def openWorkFile(self):
-    #     # sucName = self.d
-    #     # self.sucFile =
-    #     pass
+        self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
+        if len(self.dFiles) == 0:
+            return
         for file in self.dFiles:
             self.doneFile[file] = 0
         while 1:
-            # if self.orderQueue.empty():
-            #     time.sleep(30)
-            #     continue
             order = None
-            if not self.orderQueue.empty():
-                order = self.orderQueue.get(1)
-                self.dOrder[order.tradeId] = order
-                logging.debug('get order %d from queue', order.tradeId)
+            # if not self.orderQueue.empty():
+            #     order = self.orderQueue.get(1)
+            #     self.dOrder[order.tradeId] = order
+            #     logging.debug('get order %d from queue', order.tradeId)
             orderRsp = self.kt.syncRecv()
             logging.debug(orderRsp)
             tradeId = int(orderRsp[0])
@@ -297,18 +296,51 @@ class CheckWrite(threading.Thread):
             if tradeId in self.dOrder:
                 order = self.dOrder.pop(tradeId)
             else:
-                # time.sleep(10)
+                logging.error('tradeid %d is not check order', tradeId)
                 continue
             inFile = order.file
-            fp = self.dFiles[inFile][6]
+            # fp = self.dFiles[inFile][6]
+            fp = self.checkSub(orderRsp, inFile)
             logging.debug('write %d to rsp file', tradeId)
             fp.write('%s%s' % (order.line, os.linesep))
             self.doneFile[inFile] += 1
             if self.doneFile[inFile] == self.dFiles[inFile][1]:
                 logging.info('file %s completed after process %d lines.', inFile, self.doneFile[inFile])
-                self.dFiles.pop(inFile)
+                aFileInfo = self.dFiles.pop(inFile)
+                self.dealFile(aFileInfo)
             if len(self.dFiles) == 0:
                 break
+
+    def checkSub(self, orderRsp, inFile):
+        rsp = orderRsp[3]
+        m = None
+        m = self.pattImsi.search(rsp)
+        fp = None
+        if m:
+            logging.debug(m.groups())
+            fp = self.dFiles[inFile][6]
+        else:
+            logging.debug('no find %s', orderRsp[0])
+            fp = self.dFiles[inFile][7]
+        return fp
+
+    def dealFile(self, aFileInfo):
+        # self.dFiles[fi] = [fileBase, count, fileWkSuc, fileWkErr, fileOutSuc, fileOutErr, fWkSuc, fWkErr]
+        fSuc = aFileInfo[6]
+        fErr = aFileInfo[7]
+        fSuc.close()
+        fErr.close()
+        fileWkSuc = aFileInfo[2]
+        fileWkErr = aFileInfo[3]
+        fileOutSuc = aFileInfo[4]
+        fileOutErr = aFileInfo[5]
+        fileBkSuc = os.path.join(self.main.dirBack, os.path.basename(fileWkSuc))
+        fileBkErr = os.path.join(self.main.dirBack, os.path.basename(fileWkErr))
+        shutil.copy(fileWkSuc, fileBkSuc)
+        shutil.copy(fileWkErr, fileBkErr)
+        os.rename(fileWkSuc, fileOutSuc)
+        os.rename(fileWkErr, fileOutErr)
+        logging.info('%s complete', aFileInfo[0])
 
 
 class SubCheck(object):
@@ -341,7 +373,7 @@ class TcpClt(object):
 
     def recv(self):
         rspHead = self.tcpClt.recv(12)
-        logging.debug('recv head: %s', rspHead)
+        # logging.debug('recv head: %s', rspHead)
         lenHead = len(rspHead)
         while lenHead < 12:
             lenLast = 12 - lenHead
@@ -352,7 +384,7 @@ class TcpClt(object):
         rspLen = int(rspHead[0:8])
         rspBodyLen = rspLen - 12
         rspMsg = self.tcpClt.recv(rspBodyLen)
-        logging.debug('recv: %s', rspMsg)
+        # logging.debug('recv: %s', rspMsg)
         rcvLen = len(rspMsg)
         while rcvLen < rspBodyLen:
             rspTailLen = rspBodyLen - rcvLen
@@ -412,7 +444,7 @@ class KtClient(object):
         # i = 0
         # while i < orderNum:
         rspMsg = self.recvResp()
-        logging.debug(rspMsg)
+        # logging.debug(rspMsg)
         m = regx.search(rspMsg)
         orderRsp = None
         if m is not None:
@@ -652,6 +684,8 @@ class Builder(object):
     def lineCount(self):
         for fi in self.aFiles:
             fileBase = os.path.basename(fi)
+            fileBack = os.path.join(self.main.dirBack, fileBase)
+            shutil.copy(fi, fileBack)
             fileSuc = '%s_suc.txt' % fileBase
             fileErr = '%s_err.txt' % fileBase
             fileWkSuc = os.path.join(self.main.dirWork, fileSuc)
@@ -665,6 +699,7 @@ class Builder(object):
                 pass
             count += 1
             self.dFiles[fi] = [fileBase,count, fileWkSuc, fileWkErr, fileOutSuc, fileOutErr, fWkSuc, fWkErr]
+            logging.info('file: %s %d', fi, count)
             # self.dFileSize[fi] = count
         return self.dFiles
 
@@ -678,8 +713,8 @@ class Builder(object):
         port = rows[0][2]
         cur.close()
         logging.info('server ip: %s  port: %s', ip ,port)
-        # self.kt = KtClient(ip, port)
-        self.kt = KtClient('10.7.5.164', '16101')
+        self.kt = KtClient(ip, port)
+        # self.kt = KtClient('10.7.5.164', '16101')
         return self.kt
 
     def buildQueue(self):
@@ -893,9 +928,6 @@ class Director(object):
         self.shutDown = None
         self.fRsp = None
 
-    # def saveOrderRsp(self, order):
-    #     self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
-
     def start(self):
         self.builder.findFile()
         self.builder.lineCount()
@@ -913,41 +945,6 @@ class Director(object):
         logging.info('reader complete.')
         writer.join()
         logging.info('writer complete.')
-
-        # # localIp = self.factory.getLocalIp()
-        # logging.info(appcmd)
-        # dHosts = self.builder.loadHosts()
-        # dProcess = self.builder.loadProcess()
-        # logging.info('handling host:')
-        # self.builder.printAllHost()
-        # logging.info('all process:')
-        # aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
-        # logging.info(aProcessStatus )
-        # logging.info('handling process:')
-        # aProcessStatus = self.builder.printProcess(dProcess)
-        # logging.info(aProcessStatus)
-        #
-        # localHost = socket.gethostname()
-        # aAcCons = self.builder.buildAcConsole()
-        # # self.builder.printAllProcess()
-        # acNum = len(aAcCons)
-        # for ac in aAcCons:
-        #     logging.info(ac.host)
-        #     ac.start()
-        #
-        # for ac in aAcCons:
-        #     ac.join()
-        #     logging.info('host %s cmd completed.', ac.host.hostName)
-        # logging.info('all cmd done, process status:')
-        # aProcessStatus = self.builder.printProcess(self.builder.dAllProcess)
-        # print(aProcessStatus)
-        # self.printOut(aProcessStatus)
-        # logging.info('all %d remotesh completed.', acNum)
-
-    def printOut(self, sMsg):
-        fOut = open(self.builder.main.outFile, 'w')
-        fOut.write(sMsg)
-        fOut.close()
 
 
 class Main(object):
