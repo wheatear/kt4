@@ -480,12 +480,13 @@ class KtPsClient(HttpShortClient):
     dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES,notes) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5,:NOTES)'
     dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
-    dCur = {}
+
 
     def __init__(self, netInfo):
         self.dNetInfo = netInfo
         self.orderTablePre = 'i_provision'
         self.conn = None
+        self.dCur = {}
 
     def connectServer(self):
         if self.conn is not None: return self.conn
@@ -538,12 +539,14 @@ class KtPsClient(HttpShortClient):
         aWaitPs = [None] * len(order.aReqMsg)
         dWaitNo = {}
         for i,cmd in enumerate(order.aReqMsg):
-            cmd.cmdTmpl['PS_ID'] = rows[i][0]
-            cmd.cmdTmpl['DONE_CODE'] = rows[i][1]
-            waitPs = {'PS_ID': rows[i][0]}
-            logging.debug('psid: %d %d', rows[i][0], i)
+            psId = rows[i][0]
+            doneCode = rows[i][1]
+            cmd.cmdTmpl['PS_ID'] = psId
+            cmd.cmdTmpl['DONE_CODE'] = doneCode
+            waitPs = {'PS_ID': psId}
+            logging.debug('psid: %d %d', psId, i)
             aWaitPs[i] = waitPs
-            dWaitNo[rows[i][0]] = i
+            dWaitNo[psId] = i
         order.aWaitPs = aWaitPs
         order.dWaitNo = dWaitNo
 
