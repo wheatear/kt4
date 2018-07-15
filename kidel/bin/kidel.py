@@ -219,7 +219,7 @@ class KtOrder(object):
         self.aParamName = []
         self.dParam = {}
         self.net = None
-        self.aReqMsg = []
+        self.aReq = []
         self.aResp = []
         self.aWaitPs = []
         self.dWaitNo = {}
@@ -262,8 +262,15 @@ class CheckRead(threading.Thread):
 
     def run(self):
         for fi in self.aFiles:
-            aCmdTpl = self.builder.dCmdTplGrp[fi]
-            self.kt.aCmdTemplates = aCmdTpl
+            # fileBody, fileExt = os.path.splitext(fi)
+            # aCmdTpl = self.builder.dFildCmdMap[fileExt]
+            logging.info('process file %s', fi)
+            tplName = self.dFiles[fi][2]
+            if tplName not in self.builder.dCmdTplGrp:
+                logging.error('no cmd template for %s', fi)
+                exit
+            self.kt.aCmdTemplates = self.builder.dCmdTplGrp[tplName]
+
             i = 0
             fp = self.main.openFile(fi, 'r')
             for line in fp:
@@ -273,9 +280,11 @@ class CheckRead(threading.Thread):
                 i += 1
                 if i > 199:
                     i = 0
+                    time.sleep(3)
                     while self.orderQueue.qsize() > 1000:
                         logging.info('order queue size exceed 1000, sleep 10')
                         time.sleep(10)
+                logging.debug(line)
                 aPara = line.split()
                 billId = aPara[2]
                 subBillId = aPara[1]
@@ -301,43 +310,40 @@ class CheckWrite(threading.Thread):
         self.kt = builder.kt
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
-        self.doneFile = {}
+        self.doneOrders = {}
         self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
         if len(self.dFiles) == 0:
             return
         for file in self.dFiles:
-            self.doneFile[file] = 0
+            self.doneOrders[file] = 0
+        time.sleep(30)
+        emptyCounter = 0
+        i = 0
         while 1:
             order = None
-            # if not self.orderQueue.empty():
-            #     order = self.orderQueue.get(1)
-            #     self.dOrder[order.tradeId] = order
-            #     logging.debug('get order %d from queue', order.tradeId)
-            orderRsp = self.kt.syncRecv()
-            logging.debug(orderRsp)
-            tradeId = int(orderRsp[0])
-            logging.debug('get order %d from socket', tradeId)
-
-            while tradeId not in self.dOrder:
-                order = self.orderQueue.get(1)
-                self.dOrder[order.tradeId] = order
-                logging.debug('get order %d from queue', order.tradeId)
-            order = None
-            if tradeId in self.dOrder:
-                order = self.dOrder.pop(tradeId)
-            else:
-                logging.error('tradeid %d is not check order', tradeId)
+            if self.orderQueue.empty():
+                emptyCounter += 1
+                if emptyCounter > 20:
+                    logging.info('exceed 20 times empty, exit.')
+                    break
                 continue
+            i += 1
+            if i > 199:
+                i = 0
+                time.sleep(3)
+            order = self.orderQueue.get(1)
+            logging.debug('get order %s %d from queue', order.dParam['BILL_ID'], order.aReq[0].cmdTmpl['PS_ID'])
+            self.kt.recvOrder(order)
+            if len(order.aWaitPs) > 0:
+                self.orderQueue.put(order, 1)
+                continue
+            self.makeRsp(order)
             inFile = order.file
-            # fp = self.dFiles[inFile][6]
-            fp = self.checkSub(orderRsp, inFile)
-            logging.debug('write %d to rsp file', tradeId)
-            fp.write('%s%s' % (order.line, os.linesep))
-            self.doneFile[inFile] += 1
-            if self.doneFile[inFile] == self.dFiles[inFile][1]:
-                logging.info('file %s completed after process %d lines.', inFile, self.doneFile[inFile])
+            self.doneOrders[inFile] += 1
+            if self.doneOrders[inFile] == self.dFiles[inFile][1]:
+                logging.info('file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
                 aFileInfo = self.dFiles.pop(inFile)
                 self.dealFile(aFileInfo)
             if len(self.dFiles) == 0:
@@ -356,22 +362,29 @@ class CheckWrite(threading.Thread):
             fp = self.dFiles[inFile][7]
         return fp
 
+    def makeRsp(self, order):
+        inFile = order.file
+        fp = self.dFiles[inFile][4]
+        for rsp in order.aResp:
+            psStatus = rsp[1]
+            failReason = rsp[2]
+            if psStatus == 9:
+                continue
+            if failReason.find('Subscriber not defined, KI not loaded') > -1:
+                continue
+            if psStatus < 9:
+                fp.write('%s%s' % (order.line, os.linesep))
+                break
+
     def dealFile(self, aFileInfo):
-        # self.dFiles[fi] = [fileBase, count, fileWkSuc, fileWkErr, fileOutSuc, fileOutErr, fWkSuc, fWkErr]
-        fSuc = aFileInfo[6]
-        fErr = aFileInfo[7]
-        fSuc.close()
-        fErr.close()
-        fileWkSuc = aFileInfo[2]
-        fileWkErr = aFileInfo[3]
-        fileOutSuc = aFileInfo[4]
-        fileOutErr = aFileInfo[5]
-        fileBkSuc = os.path.join(self.main.dirBack, os.path.basename(fileWkSuc))
-        fileBkErr = os.path.join(self.main.dirBack, os.path.basename(fileWkErr))
-        shutil.copy(fileWkSuc, fileBkSuc)
-        shutil.copy(fileWkErr, fileBkErr)
-        os.rename(fileWkSuc, fileOutSuc)
-        os.rename(fileWkErr, fileOutErr)
+        # self.dFiles[fi] = [fileBase,count, cmdTpl, fileWkRsp, fWkRsp, fileOutRsp]
+        fWkRsp = aFileInfo[4]
+        fWkRsp.close()
+        fileWkRsp = aFileInfo[3]
+        fileOutRsp = aFileInfo[5]
+        fileBkRsp = os.path.join(self.main.dirBack, os.path.basename(fileWkRsp))
+        shutil.copy(fileWkRsp, fileBkRsp)
+        os.rename(fileWkRsp, fileOutRsp)
         logging.info('%s complete', aFileInfo[0])
 
 
@@ -441,9 +454,10 @@ class KtPsTmpl(object):
 class KtClient(object):
     dSql = {}
     dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
+    # dSql['OrderId'] = 'select SEQ_PS_ID.NEXTVAL,SEQ_PS_DONECODE.NEXTVAL FROM DUAL'
     dSql['RegionCode'] = "select region_code,ps_net_code from ps_net_number_area t where :BILL_ID between start_number and end_number"
     dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES,notes) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5,:NOTES)'
-    dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
+    dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
     dSql['SyncServ'] = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort' and b.state=1"
     dSql['TradeId'] = 'select SEQ_PS_ID.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
@@ -451,11 +465,12 @@ class KtClient(object):
     def __init__(self, conn):
         self.conn = conn
         self.orderTablePre = 'i_provision'
+        self.orderHisTablePre = 'ps_provision'
         self.syncServer = None
         self.syncPort = None
         self.tcpClt = None
-        self.loadSyncServer()
-        self.connTcpServer()
+        # self.loadSyncServer()
+        # self.connTcpServer()
         self.dCur = {}
         self.aCmdTemplates = []
 
@@ -532,7 +547,7 @@ class KtClient(object):
 
     def getCurbyName(self, curName):
         if curName in self.dCur: return self.dCur[curName]
-        if (curName[:6] != 'SendPs') and (curName not in self.dSql):
+        if (curName[:6] != 'SendPs') and (curName[:6] != 'RecvPs') and (curName not in self.dSql):
             logging.error('no such cur sql: %s', curName)
             return None
         sql = ''
@@ -540,6 +555,10 @@ class KtClient(object):
             namePre = curName[:6]
             regionCode = curName[6:]
             sql = self.dSql[namePre] % (self.orderTablePre, regionCode)
+        elif curName[:6] == 'RecvPs':
+            namePre = curName[:6]
+            regionCode = curName[6:]
+            sql = self.dSql[namePre] % (regionCode)
         else:
             sql = self.dSql[curName]
         cur = self.conn.prepareSql(sql)
@@ -550,9 +569,9 @@ class KtClient(object):
         return True
 
     def setOrderCmd(self, order):
-        order.aCmd = copy.deepcopy(self.aCmdTemplates)
+        order.aReq = copy.deepcopy(self.aCmdTemplates)
         dtNow = datetime.datetime.now()
-        for cmd in order.aCmd:
+        for cmd in order.aReq:
             for field in cmd.cmdTmpl:
                 if field in order.dParam:
                     cmd.cmdTmpl[field] = order.dParam[field]
@@ -569,13 +588,14 @@ class KtClient(object):
     def getOrderId(self, order):
         # sql = self.__class__.dSql['OrderId']
         cur = self.getCurbyName('OrderId')
-        dPara = {'PSNUM':len(order.aReqMsg)}
-        num = len(order.aReqMsg)
+        dPara = {'PSNUM':len(order.aReq)}
+        num = len(order.aReq)
         self.conn.executeCur(cur, dPara)
         rows = self.conn.fetchall(cur)
-        aWaitPs = [None] * len(order.aReqMsg)
+        aWaitPs = [None] * len(order.aReq)
+        aResp = [None] * len(order.aReq)
         dWaitNo = {}
-        for i,cmd in enumerate(order.aReqMsg):
+        for i,cmd in enumerate(order.aReq):
             psId = rows[i][0]
             doneCode = rows[i][1]
             cmd.cmdTmpl['PS_ID'] = psId
@@ -586,6 +606,7 @@ class KtClient(object):
             dWaitNo[psId] = i
         order.aWaitPs = aWaitPs
         order.dWaitNo = dWaitNo
+        order.aResp = aResp
 
     def getRegionCode(self, order):
         # sql = self.__class__.dSql['RegionCode']
@@ -597,11 +618,10 @@ class KtClient(object):
         order.dParam['REGION_CODE'] = '100'
         if row:
             order.dParam['REGION_CODE'] = row[0]
-        for req in order.aReqMsg:
+        for req in order.aReq:
             req.cmdTmpl['REGION_CODE'] = order.dParam['REGION_CODE']
 
     def sendOrder(self, order):
-        self.connectServer()
         self.setOrderCmd(order)
         self.getOrderId(order)
         self.getRegionCode(order)
@@ -609,15 +629,15 @@ class KtClient(object):
         cur = self.getCurbyName(curName)
         # logging.debug(order.aReqMsg)
         aParam = []
-        for req in order.aReqMsg:
+        for req in order.aReq:
             # aParam.append(req.cmdTmpl)
             # logging.debug('order cmd: %s', req.cmdTmpl)
             cmd = req.cmdTmpl
-            cmd['NOTES'] = '%s : %s' % (cmd.pop('PS_MODEL_NAME'), cmd.pop('OLD_PS_ID'))
+            cmd['NOTES'] = 'kidel.py %s : %s' % (cmd.pop('PS_MODEL_NAME'), cmd.pop('OLD_PS_ID'))
             aParam = [req.cmdTmpl]
             self.conn.executemanyCur(cur, aParam)
             cur.connection.commit()
-            time.sleep(3)
+            # time.sleep(3)
         # logging.debug(aParam)
         # self.conn.executemanyCur(cur, aParam)
         # cur.connection.commit()
@@ -626,28 +646,45 @@ class KtClient(object):
         #     logging.debug('send:%s', req)
         #     self.remoteServer.send(req)
         #     self.recvResp(order)
+
     def recvOrder(self, order):
-        self.connectServer()
+        # self.connectServer()
         regionCode = order.dParam['REGION_CODE']
         # month = time.strftime("%Y%m", time.localtime())
-        month = order.aReqMsg[0]['CREATE_DATE'].strftime('%Y%m')
+        month = order.aReq[0].cmdTmpl['CREATE_DATE'].strftime('%Y%m')
         curName = 'RecvPs%s_%s' % (regionCode, month)
         cur = self.getCurbyName(curName)
         aPsid = order.aWaitPs
-        while (len(aPsid) > 0):
-            self.conn.executemanyCur(cur, aPsid)
-            rows = self.conn.fetchall(cur)
-            for row in rows:
-                psId = row[0]
-                psStatus = row[1]
-                failReason = row[2]
-                indx = order.dWaitNo[psId]
-                order.aResp[indx] = row
-                order.aWaitPs.pop(indx)
-            num = len(rows)
-            aPsid = order.aWaitPs
-            logging.info('get %d result, remain %d ps', num, len(aPsid))
-            time.sleep(30)
+        j = 0
+        for i,psId in enumerate(aPsid):
+            self.conn.executeCur(cur, psId)
+            row = self.conn.fetchone(cur)
+        # for row in rows:
+            if not row:
+                continue
+            j += 1
+            psId = row[0]
+            psStatus = row[1]
+            failReason = row[2]
+            # indx = order.dWaitNo[psId]
+            logging.debug(row)
+            order.aResp[i] = row
+            order.aWaitPs.pop(i)
+        logging.info('get %d result, remain %d ps', j, len(order.aWaitPs))
+        # while (len(aPsid) > 0):
+        #     self.conn.executemanyCur(cur, aPsid)
+        #     rows = self.conn.fetchall(cur)
+        #     for row in rows:
+        #         psId = row[0]
+        #         psStatus = row[1]
+        #         failReason = row[2]
+        #         indx = order.dWaitNo[psId]
+        #         order.aResp[indx] = row
+        #         order.aWaitPs.pop(indx)
+        #     num = len(rows)
+        #     aPsid = order.aWaitPs
+        #     logging.info('get %d result, remain %d ps', num, len(aPsid))
+        #     time.sleep(30)
 
 
 class AcConsole(threading.Thread):
@@ -851,11 +888,11 @@ class Builder(object):
         self.inFile = inFile
         self.conn = main.conn
         self.aFiles = []
-        # self.dFileSize = {}
         self.dFiles = {}
         self.kt = None
         self.orderQueue = None
         self.dCmdTplGrp = {}
+        self.dFildCmdMap = {'.cy1':'delsub', '.cy2':'delauc', '.cy3':'delsub'}
 
     def findFile(self):
         logging.info('find files ')
@@ -867,32 +904,32 @@ class Builder(object):
     def lineCount(self):
         for fi in self.aFiles:
             fileBase = os.path.basename(fi)
+            nameBody,nameExt = os.path.splitext(fileBase)
+            cmdTpl = self.dFildCmdMap[nameExt]
             fileBack = os.path.join(self.main.dirBack, fileBase)
             shutil.copy(fi, fileBack)
-            fileSuc = '%s_suc.txt' % fileBase
-            fileErr = '%s_err.txt' % fileBase
-            fileWkSuc = os.path.join(self.main.dirWork, fileSuc)
-            fileWkErr = os.path.join(self.main.dirWork, fileErr)
-            fWkSuc = self.main.openFile(fileWkSuc, 'w')
-            fWkErr = self.main.openFile(fileWkErr, 'w')
-            fileOutSuc = os.path.join(self.main.dirOut, fileSuc)
-            fileOutErr = os.path.join(self.main.dirOut, fileErr)
+            fileRsp = '%s.rsp' % fileBase
+            fileWkRsp = os.path.join(self.main.dirWork, fileRsp)
+            fWkRsp = self.main.openFile(fileWkRsp, 'w')
+            fileOutRsp = os.path.join(self.main.dirOut, fileRsp)
+
             count = -1
             for count, line in enumerate(open(fi, 'rU')):
                 pass
             count += 1
-            self.dFiles[fi] = [fileBase,count, fileWkSuc, fileWkErr, fileOutSuc, fileOutErr, fWkSuc, fWkErr]
+            self.dFiles[fi] = [fileBase,count, cmdTpl, fileWkRsp, fWkRsp, fileOutRsp]
             logging.info('file: %s %d', fi, count)
             # self.dFileSize[fi] = count
         return self.dFiles
 
     def loadCmd(self):
-
+        logging.info('loading cmd template')
         tplPatt = self.main.tplFile
         aTplFiles = glob.glob(tplPatt)
+        logging.info('template files: %s', aTplFiles)
         for tplFile in aTplFiles:
             fileName = os.path.basename(tplFile)
-            # tplName = os.path.splitext(fileName)[0]
+            tplName = os.path.splitext(fileName)[0]
             aCmdTmpl = []
             tmplCmd = {}
             i = 0
@@ -922,7 +959,7 @@ class Builder(object):
                 if len(aParam) < 1:
                     continue
                 tmplCmd[aParam[0]] = aParam[1]
-            self.dCmdTplGrp[fileName] = aCmdTmpl
+            self.dCmdTplGrp[tplName] = aCmdTmpl
 
     def buildKtClient(self):
         self.kt = KtClient(self.conn)
@@ -1086,16 +1123,16 @@ class DbConn(object):
         return cur
 
     def executemanyCur(self, cur, params):
-        logging.info('execute cur %s : %s', cur.statement, params)
+        # logging.info('execute cur %s : %s', cur.statement, params)
         try:
             cur.executemany(None, params)
         except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
+            logging.error('executemany sql err %s:%s ', e, cur.statement)
             return None
         return cur
 
     def executeCur(self, cur, params=None):
-        logging.info('execute cur %s', cur.statement)
+        # logging.info('execute cur %s', cur.statement)
         try:
             if params is None:
                 cur.execute(None)
@@ -1107,29 +1144,29 @@ class DbConn(object):
         return cur
 
     def fetchmany(self, cur):
-        logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
+        # logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
         try:
             rows = cur.fetchmany()
         except orcl.DatabaseError, e:
-            logging.error('fetch sql err %s:%s ', e, cur.statement)
+            logging.error('fetchmany sql err %s:%s ', e, cur.statement)
             return None
         return rows
 
     def fetchone(self, cur):
-        logging.debug('fethone from %s', cur.statement)
+        # logging.debug('fethone from %s', cur.statement)
         try:
             row = cur.fetchone()
         except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
+            logging.error('fetchone sql err %s:%s ', e, cur.statement)
             return None
         return row
 
     def fetchall(self, cur):
-        logging.debug('fethone from %s', cur.statement)
+        # logging.debug('feth all from %s', cur.statement)
         try:
             rows = cur.fetchall()
         except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
+            logging.error('fetchall sql err %s:%s ', e, cur.statement)
             return None
         return rows
 
@@ -1141,8 +1178,10 @@ class Director(object):
         self.fRsp = None
 
     def start(self):
+        logging.info('find in files')
         self.builder.findFile()
         self.builder.lineCount()
+        self.builder.loadCmd()
         self.builder.buildKtClient()
         queue = self.builder.buildQueue()
         reader = self.builder.buildCheckRead()
@@ -1263,6 +1302,7 @@ class Main(object):
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
+        logging.info('infile: %s' % self.inFile)
 
         self.cfg.loadDbinfo()
         self.connectServer()
