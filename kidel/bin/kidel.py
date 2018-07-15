@@ -318,7 +318,7 @@ class CheckWrite(threading.Thread):
             return
         for file in self.dFiles:
             self.doneOrders[file] = 0
-        time.sleep(30)
+        time.sleep(10)
         emptyCounter = 0
         i = 0
         while 1:
@@ -462,8 +462,9 @@ class KtClient(object):
     dSql['SyncServ'] = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort' and b.state=1"
     dSql['TradeId'] = 'select SEQ_PS_ID.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
 
-    def __init__(self, conn):
+    def __init__(self, conn, writeConn):
         self.conn = conn
+        self.writeConn = writeConn
         self.orderTablePre = 'i_provision'
         self.orderHisTablePre = 'ps_provision'
         self.syncServer = None
@@ -561,7 +562,10 @@ class KtClient(object):
             sql = self.dSql[namePre] % (regionCode)
         else:
             sql = self.dSql[curName]
-        cur = self.conn.prepareSql(sql)
+        if curName[:6] == 'RecvPs':
+            cur = self.writeConn.prepareSql(sql)
+        else:
+            cur = self.conn.prepareSql(sql)
         self.dCur[curName] = cur
         return cur
 
@@ -887,6 +891,7 @@ class Builder(object):
         self.main = main
         self.inFile = inFile
         self.conn = main.conn
+        self.writeConn = main.writeConn
         self.aFiles = []
         self.dFiles = {}
         self.kt = None
@@ -962,7 +967,7 @@ class Builder(object):
             self.dCmdTplGrp[tplName] = aCmdTmpl
 
     def buildKtClient(self):
-        self.kt = KtClient(self.conn)
+        self.kt = KtClient(self.conn, self.writeConn)
         return self.kt
 
     def buildQueue(self):
@@ -1108,7 +1113,7 @@ class DbConn(object):
             # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
             # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
         except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'], self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.dbInfo['dbhost'], self.dbInfo['dbusr'], self.dbInfo['dbsid'], e)
             exit()
         return self.conn
 
@@ -1139,7 +1144,7 @@ class DbConn(object):
             else:
                 cur.execute(None, params)
         except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s ', e, cur.statement)
+            logging.error('execute sql err %s:%s %s', e, cur.statement, params)
             return None
         return cur
 
@@ -1203,6 +1208,7 @@ class Main(object):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
         self.conn = None
+        self.writeConn = None
         self.inFile = None
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
@@ -1290,6 +1296,8 @@ class Main(object):
         if self.conn is not None: return self.conn
         self.conn = DbConn(self.cfg.dbinfo)
         self.conn.connectServer()
+        self.writeConn = DbConn(self.cfg.dbinfo)
+        self.writeConn.connectServer()
         return self.conn
 
     def start(self):
