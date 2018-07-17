@@ -1038,7 +1038,7 @@ class Main(object):
         self.cfg = Conf(main, self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
-                            datefmt='%Y%m%d%I%M%S')
+                            datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
 

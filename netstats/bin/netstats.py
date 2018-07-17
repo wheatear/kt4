@@ -925,7 +925,7 @@ class Main(object):
         self.logLevel = self.cfg.loadLogLevel()
         # self.logLevel = logging.DEBUG
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
-                            datefmt='%Y%m%d%I%M%S')
+                            datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.baseName)
 
         self.cfg.loadDbinfo()

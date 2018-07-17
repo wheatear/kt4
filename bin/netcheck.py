@@ -210,7 +210,7 @@ class Main(object):
         # self.logLevel = logging.INFO
         # print('loglevel: %d  logFile: %s' % (self.logLevel, self.logFile))
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
-                            datefmt='%Y%m%d%I%M%S')
+                            datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
         print('respfile: %s' % self.outFile)

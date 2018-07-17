@@ -154,7 +154,7 @@ def main():
     logFile = '%s/%s.log' % (logDir, sysName)
     # print 'bindir: %s, apphome: %s, cfgdir: %s' % (binDir, appHome,cfgDir)
 
-    logging.basicConfig(filename=logFile,level=logging.DEBUG,format='%(asctime)s %(levelname)s %(message)s',datefmt='%Y%m%d%I%M%S')
+    logging.basicConfig(filename=logFile,level=logging.DEBUG,format='%(asctime)s %(levelname)s %(message)s',datefmt='%Y%m%d%H%M%S')
     logging.info('spread file starting...')
 
     logging.info('put dirs : %s', aSpreadDirs)
