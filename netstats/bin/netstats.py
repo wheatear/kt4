@@ -639,63 +639,86 @@ class Builder(object):
         return ip
 
 
-class ExpFailPs(object):
-    sqlFailPs = "select PS_ID,DONE_CODE,PS_TYPE,PRIO_LEVEL,PS_SERVICE_TYPE,BILL_ID,SUB_BILL_ID,PLAN_ID,to_char(SUB_VALID_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(UPP_CREATE_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(CREATE_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(START_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(END_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(RET_DATE,'yyyy-mm-dd hh24:mi:ss'),to_char(STATUS_UPD_DATE,'yyyy-mm-dd hh24:mi:ss'),ACTION_ID,PS_PARAM,PS_STATUS,FAIL_NUM,FAIL_REASON,OP_ID,REGION_CODE,to_char(HAND_DATE,'yyyy-mm-dd hh24:mi:ss'),SERVICE_ID,SUSPEND_PS_ID,PS_SERVICE_CODE from v_ps_his_%s where ps_status=-1 and create_date>=trunc(sysdate-1) and create_date<trunc(sysdate) and ps_service_type in('HLR','EDSMP')"
+class NetStati(object):
+    sqlNetCount = "select ps_net_code,ps_status,count(*) from v_ps_split_his_%s where create_date>=trunc(sysdate-1) and create_date<trunc(sysdate) group by ps_net_code,ps_status order by 1,2"
+    sqlNetTime = "select ps_net_code,round(avg(end_date-start_date)*86400),round(max(end_date-start_date)*86400) from v_ps_split_his_%s where create_date>=trunc(sysdate-1) and create_date<trunc(sysdate) group by ps_net_code order by 1"
+    sqlSaveNet = "insert into PS_SPLIT_STATISTICS_HIS_%s(ps_date,Ps_Net_Code,Ps_Total,Ps_Success,Ps_Fail,Ps_Average,PS_MAX) values(:PS_DATE,:PS_NET_CODE,:PS_TOTAL,:PS_SUCCESS,:PS_FAIL,:PS_AVERAGE,:PS_MAX)"
+    aSaveNetField = ['PS_DATE','PS_NET_CODE','PS_TOTAL','PS_SUCCESS','PS_FAIL','PS_AVERAGE','PS_MAX']
     def __init__(self, main):
         self.main = main
         self.conn = main.conn
-        self.wkFilePre = main.wkFile
-        self.outFilePre = main.outFile
-        self.psMonth = None
-        self.curPs = None
-        self.fFailPs = None
-        self.psSep = '||'
+        self.dNetStati = {}
 
-    def prepareFile(self):
+    def prepareEnv(self):
         click = time.time()
         self.yesClick = click - 86400
         self.yesTime = time.localtime(self.yesClick)
         self.yesDate = time.strftime('%Y%m%d', self.yesTime)
-        self.wkFile = '%s_%s' % (self.wkFilePre, self.yesDate)
-        self.outFile = '%s_%s' % (self.outFilePre, self.yesDate)
-        self.fFailPs = self.main.openFile(self.wkFile, 'w')
+        self.iYesDate = int(self.yesDate)
+        self.yesMon = time.strftime('%Y%m', self.yesTime)
 
-    def prepareSql(self):
-        self.psMonth = time.strftime('%Y%m', self.yesTime)
-        # print('sql: %s' % self.sqlFailPs)
-        self.sqlFailPsMon = self.sqlFailPs % self.psMonth
-        self.curPs = self.conn.prepareSql(self.sqlFailPsMon)
+        self.sqlNetCount = self.sqlNetCount % self.yesMon
+        self.sqlNetTime = self.sqlNetTime % self.yesMon
+        self.sqlSaveNet = self.sqlSaveNet % self.yesMon
 
-    def doneFile(self):
-        shutil.copy(self.wkFile, self.main.dirBack)
-        os.rename(self.wkFile, self.outFile)
-
-    def expFailPs(self):
-        logging.info('prepare sql')
-        self.prepareFile()
-        self.prepareSql()
-        logging.info('execute %s', self.sqlFailPs)
-
-        psHead = 'PS_ID||DONE_CODE||PS_TYPE||PRIO_LEVEL||PS_SERVICE_TYPE||BILL_ID||SUB_BILL_ID||PLAN_ID||SUB_VALID_DATE||UPP_CREATE_DATE||CREATE_DATE||START_DATE||END_DATE||RET_DATE||STATUS_UPD_DATE||ACTION_ID||PS_PARAM||PS_STATUS||FAIL_NUM||FAIL_REASON||OP_ID||REGION_CODE||HAND_DATE||SERVICE_ID||SUSPEND_PS_ID||PS_SERVICE_CODE'
-        self.fFailPs.write('%s%s' % (psHead, os.linesep))
-        self.conn.executeCur(self.curPs)
+    def getNetCount(self):
+        self.curNetCount = self.conn.prepareSql(self.sqlNetCount)
+        self.conn.executeCur(self.curNetCount)
         i = 0
-        for ps in self.curPs:
-            i += 1
-            aPs = list(ps)
-            for i,var in enumerate(ps):
-                if isinstance(var,(int, float)):
-                    aPs[i] = '%d' % var
-                elif var is None:
-                    aPs[i] = ''
-            # print(aPs)
-            psStr = self.psSep.join(aPs)
-            self.fFailPs.write('%s%s' % (psStr, os.linesep))
-        self.fFailPs.close()
-        self.curPs.close()
-        # self.conn.close()
-        logging.info('export %d ps into %s', i, self.outFile)
-        self.doneFile()
+        for row in self.curNetCount:
+            netCode = row[0]
+            status = row[1]
+            netCount = row[2]
+            if netCode not in self.dNetStati:
+                self.dNetStati[netCode] = {'PS_DATE':self.yesDate, 'PS_NET_CODE':netCode}
+            dNet = self.dNetStati[netCode]
+            if status == -1:
+                dNet['PS_FAIL'] = netCount
+            elif status == 9:
+                dNet['PS_SUCCESS'] = netCount
+        self.curNetCount.close()
+
+    def getNetTime(self):
+        self.curNetTime = self.conn.prepareSql(self.sqlNetTime)
+        self.conn.executeCur(self.curNetTime)
+        i = 0
+        for row in self.curNetTime:
+            netCode = row[0]
+            avgTime = row[1]
+            maxTime = row[2]
+            if netCode not in self.dNetStati:
+                self.dNetStati[netCode] = {'PS_DATE':self.yesDate, 'PS_NET_CODE':netCode}
+            dNet = self.dNetStati[netCode]
+            dNet['PS_AVERAGE'] = avgTime
+            dNet['PS_MAX'] = maxTime
+        self.curNetTime.close()
+
+    def saveNetInfo(self):
+        cur = self.conn.prepareSql(self.sqlSaveNet)
+        for net in self.dNetStati:
+            dNet = self.dNetStati[net]
+            for fi in self.aSaveNetField:
+                if fi in dNet:
+                    continue
+                if fi in ('PS_SUCCESS', 'PS_FAIL'):
+                    dNet[fi] = 0
+                else:
+                    dNet[fi] = None
+            dNet['PS_TOTAL'] = dNet['PS_SUCCESS'] + dNet['PS_FAIL']
+            self.conn.executeCur(cur, dNet)
+            cur.connection.commit()
+        cur.close()
+
+    def start(self):
+        self.prepareEnv()
+        logging.info('1.取网元处理量统计数据...')
+        self.getNetCount()
+        logging.info('2.取网元处理时长数据...')
+        self.getNetTime()
+        logging.info('3.插入统计表...')
+        self.saveNetInfo()
+        self.conn.close()
+
 
 class DbConn(object):
     def __init__(self, dbInfo):
@@ -737,7 +760,7 @@ class DbConn(object):
         return cur
 
     def executeCur(self, cur, params=None):
-        logging.info('execute cur %s', cur.statement)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             if params is None:
                 cur.execute(None)
@@ -775,6 +798,9 @@ class DbConn(object):
             return None
         return rows
 
+    def close(self):
+        self.conn.close()
+
 
 class Director(object):
     def __init__(self, builder):
@@ -807,26 +833,47 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.conn = None
-        self.psFile = 'failps'
+        # self.psFile = 'failps'
 
-    def parseWorkEnv(self):
+    def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
-        appNameBody, appNameExt = os.path.splitext(appName)
+        self.appName = appName
+        appNameBody, appNameExt = os.path.splitext(self.appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
+        # if self.argc < 2:
+        #     self.usage()
+        # argvs = sys.argv[1:]
+        # if self.argc > 1:
+        #     self.psFile = sys.argv[1]
 
-        if dirBin=='' or dirBin=='.':
-            dirBin = '.'
-            dirApp = '..'
-            self.dirBin = dirBin
-            self.dirApp = dirApp
+        # try:
+        #     opts, arvs = getopt.getopt(argvs, "c:t:h:")
+        # except getopt.GetoptError, e:
+        #     print 'get opt error:%s. %s' % (argvs, e)
+        #     self.usage()
+        # self.cmd = 'q'
+        # self.objType = 'h'
+        # self.host = 'a'
+        # for opt, arg in opts:
+        #     if opt == '-c':
+        #         self.cmd = arg
+        #     elif opt == '-t':
+        #         self.objType = arg
+        #     elif opt == '-h':
+        #         self.host = arg
+        # if len(arvs) > 0:
+        #     self.obj = arvs[0]
+
+    def parseWorkEnv(self):
+        if self.dirBin=='' or self.dirBin=='.':
+            self.dirBin = '.'
+            self.dirApp = '..'
         else:
-            dirApp, dirBinName = os.path.split(dirBin)
+            dirApp, dirBinName = os.path.split(self.dirBin)
             if dirApp=='':
-                dirApp = '.'
-                self.dirBin = dirBin
-                self.dirApp = dirApp
+                self.dirApp = '.'
             else:
                 self.dirApp = dirApp
         self.dirLog = os.path.join(self.dirApp, 'log')
@@ -846,33 +893,8 @@ class Main(object):
         # outName = '%s_%s' % (self.appNameBody, self.nowtime)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
-        self.wkFile = os.path.join(self.dirWork, self.psFile)
-        self.outFile = os.path.join(self.dirOut, self.psFile)
-
-    def checkArgv(self):
-        # if self.argc < 2:
-        #     self.usage()
-        # argvs = sys.argv[1:]
-        if self.argc > 1:
-            self.psFile = sys.argv[1]
-
-        # try:
-        #     opts, arvs = getopt.getopt(argvs, "c:t:h:")
-        # except getopt.GetoptError, e:
-        #     print 'get opt error:%s. %s' % (argvs, e)
-        #     self.usage()
-        # self.cmd = 'q'
-        # self.objType = 'h'
-        # self.host = 'a'
-        # for opt, arg in opts:
-        #     if opt == '-c':
-        #         self.cmd = arg
-        #     elif opt == '-t':
-        #         self.objType = arg
-        #     elif opt == '-h':
-        #         self.host = arg
-        # if len(arvs) > 0:
-        #     self.obj = arvs[0]
+        # self.wkFile = os.path.join(self.dirWork, self.psFile)
+        # self.outFile = os.path.join(self.dirOut, self.psFile)
 
     def usage(self):
         print "Usage: %s datafile" % self.baseName
@@ -908,8 +930,8 @@ class Main(object):
 
         self.cfg.loadDbinfo()
         self.connectServer()
-        expFail = ExpFailPs(self)
-        expFail.expFailPs()
+        netStatier = NetStati(self)
+        netStatier.start()
 
 
 # main here
