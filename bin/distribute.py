@@ -48,6 +48,7 @@ class DisCmd(object):
 class Distribute(object):
     def __init__(self, main):
         self.main = main
+        self.dbFile = main.dbFile
         self.file = main.souFile
         self.user = main.user
         self.remoteDir = main.remoteDir
@@ -61,7 +62,7 @@ class Distribute(object):
         self.fResult = None
 
     def makeAllHosts(self):
-        conn = sqlite3.connect('kthosts.db')
+        conn = sqlite3.connect(self.dbFile)
         cursor = conn.cursor()
         cursor.execute('SELECT hostname,hostip FROM kthosts')
         rows = cursor.fetchall()
@@ -176,25 +177,34 @@ class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
+        self.db = 'kthosts.db'
         self.souFile = None
         self.user = None
         self.remoteDir = None
 
-    def parseWorkEnv(self):
+    def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
         self.appName = appName
-        appNameBody, appNameExt = os.path.splitext(appName)
+        appNameBody, appNameExt = os.path.splitext(self.appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
+        if self.argc < 3:
+            self.usage()
+        self.souFile = sys.argv[1]
+        self.user = sys.argv[2]
+        if self.argc > 2:
+            self.remoteDir = sys.argv[3]
+        else:
+            self.remoteDir = self.souFile
 
-        self.dirApp = os.path.dirname(self.dirBin)
-        if self.dirBin == '' or self.dirBin == '.':
+    def parseWorkEnv(self):
+        if self.dirBin=='' or self.dirBin=='.':
             self.dirBin = '.'
             self.dirApp = '..'
         else:
-            dirApp = os.path.dirname(self.dirBin)
-            if dirApp == '':
+            dirApp, dirBinName = os.path.split(self.dirBin)
+            if dirApp=='':
                 self.dirApp = '.'
             else:
                 self.dirApp = dirApp
@@ -218,18 +228,7 @@ class Main(object):
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
-
-    def checkArgv(self):
-        appName = os.path.basename(self.Name)
-        self.appName = appName
-        if self.argc < 3:
-            self.usage()
-        self.souFile = sys.argv[1]
-        self.user = sys.argv[2]
-        if self.argc > 2:
-            self.remoteDir = sys.argv[3]
-        else:
-            self.remoteDir = self.souFile
+        self.dbFile = os.path.join(self.dirBin, self.db)
 
     def usage(self):
         print "Usage: %s somefiles user remotedir" % self.appName

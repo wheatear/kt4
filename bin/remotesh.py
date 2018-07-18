@@ -264,6 +264,7 @@ class RemoteSh(multiprocessing.Process):
 class ReShFac(object):
     def __init__(self, main, cmdfile):
         self.main = main
+        self.dbFile = main.dbFile
         self.cmdFile = cmdfile
         self.group = main.group
         self.hosts = main.hosts
@@ -305,7 +306,7 @@ class ReShFac(object):
         return reSh
 
     def loadHosts(self):
-        conn = sqlite3.connect('kthosts.db')
+        conn = sqlite3.connect(self.dbFile)
         cursor = conn.cursor()
         if len(self.group) > 0:
             groupName = "','".join(self.group)
@@ -424,45 +425,17 @@ class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
         self.baseName = os.path.basename(self.Name)
+        self.db = 'kthosts.db'
         self.argc = len(sys.argv)
         self.cmdFile = None
 
-    def parseWorkEnv(self):
+    def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
-        # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
-        appNameBody, appNameExt = os.path.splitext(appName)
+        self.appName = appName
+        appNameBody, appNameExt = os.path.splitext(self.appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
-
-        if dirBin=='' or dirBin=='.':
-            dirBin = '.'
-            dirApp = '..'
-            self.dirBin = dirBin
-            self.dirApp = dirApp
-        else:
-            dirApp, dirBinName = os.path.split(dirBin)
-            if dirApp=='':
-                dirApp = '.'
-                self.dirBin = dirBin
-                self.dirApp = dirApp
-            else:
-                self.dirApp = dirApp
-
-        self.dirLog = os.path.join(self.dirApp, 'log')
-        self.dirCfg = os.path.join(self.dirApp, 'config')
-        self.dirTpl = os.path.join(self.dirApp, 'template')
-        self.dirLib = os.path.join(self.dirApp, 'lib')
-
-        self.today = time.strftime("%Y%m%d", time.localtime())
-        cfgName = '%s.cfg' % self.appNameBody
-        logName = '%s_%s.log' % (self.appNameBody, self.today)
-        logPre = '%s_%s' % (self.appNameBody, self.today)
-        self.cfgFile = os.path.join(self.dirCfg, cfgName)
-        self.logFile = os.path.join(self.dirLog, logName)
-        self.logPre = os.path.join(self.dirLog, logPre)
-
-    def checkArgv(self):
         if self.argc < 2:
             self.usage()
         # self.checkopt()
@@ -481,6 +454,31 @@ class Main(object):
              elif opt == '-h':
                  self.hosts = arg.split(',')
         self.cmdFile = arvs[0]
+
+    def parseWorkEnv(self):
+        if self.dirBin=='' or self.dirBin=='.':
+            self.dirBin = '.'
+            self.dirApp = '..'
+        else:
+            dirApp, dirBinName = os.path.split(self.dirBin)
+            if dirApp=='':
+                self.dirApp = '.'
+            else:
+                self.dirApp = dirApp
+
+        self.dirLog = os.path.join(self.dirApp, 'log')
+        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirLib = os.path.join(self.dirApp, 'lib')
+
+        self.today = time.strftime("%Y%m%d", time.localtime())
+        cfgName = '%s.cfg' % self.appNameBody
+        logName = '%s_%s.log' % (self.appNameBody, self.today)
+        logPre = '%s_%s' % (self.appNameBody, self.today)
+        self.cfgFile = os.path.join(self.dirCfg, cfgName)
+        self.logFile = os.path.join(self.dirLog, logName)
+        self.logPre = os.path.join(self.dirLog, logPre)
+        self.dbFile = os.path.join(self.dirBin, self.db)
 
     def usage(self):
         print "Usage: %s [-g group] [-h host] cmdfile" % self.baseName
