@@ -1278,10 +1278,12 @@ class Main(object):
         # self.outFile = os.path.join(self.dirOut, outName)
 
     def usage(self):
-        print "Usage: %s datefile" % self.appName
-        print "example:  %s %s" % (self.appName,'res*.txt')
-        print "\t%s %s" % (self.appName, 'res_to_kt_20180614.txt')
-        print "\t%s %s" % (self.appName, 'res_callback_to_kt_20180601.txt')
+        print "Usage: %s [-t|f orderTmpl] [-p|r psid|all] [datefile]" % self.appName
+        print "example:  %s -t %s" % (self.appName,'ps_model_summary')
+        print "\t%s -f %s" % (self.appName, 'kt_hlr')
+        print "\t%s -t ps_model_summary -p 2451845353" % (self.appName)
+        print "\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName)
+        print "\t%s -f kt_hlr -p 2451845353 pccnum" % (self.appName)
         exit(1)
 
     def openFile(self, fileName, mode):
