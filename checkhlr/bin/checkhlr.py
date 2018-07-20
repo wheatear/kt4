@@ -684,10 +684,11 @@ class Builder(object):
     def lineCount(self):
         for fi in self.aFiles:
             fileBase = os.path.basename(fi)
+            fileNameBody, fileExt = os.path.splitext(fileBase)
             fileBack = os.path.join(self.main.dirBack, fileBase)
             shutil.copy(fi, fileBack)
-            fileSuc = '%s_suc.txt' % fileBase
-            fileErr = '%s_err.txt' % fileBase
+            fileSuc = '%s_suc.txt' % fileNameBody
+            fileErr = '%s_err.txt' % fileNameBody
             fileWkSuc = os.path.join(self.main.dirWork, fileSuc)
             fileWkErr = os.path.join(self.main.dirWork, fileErr)
             fWkSuc = self.main.openFile(fileWkSuc, 'w')
@@ -955,6 +956,30 @@ class Main(object):
         self.conn = None
         self.checkFile = None
 
+    def checkArgv(self):
+        if self.argc < 2:
+            self.usage()
+        argvs = sys.argv[1:]
+        self.checkFile = sys.argv[1]
+
+        # try:
+        #     opts, arvs = getopt.getopt(argvs, "c:t:h:")
+        # except getopt.GetoptError, e:
+        #     print 'get opt error:%s. %s' % (argvs, e)
+        #     self.usage()
+        # self.cmd = 'q'
+        # self.objType = 'h'
+        # self.host = 'a'
+        # for opt, arg in opts:
+        #     if opt == '-c':
+        #         self.cmd = arg
+        #     elif opt == '-t':
+        #         self.objType = arg
+        #     elif opt == '-h':
+        #         self.host = arg
+        # if len(arvs) > 0:
+        #     self.obj = arvs[0]
+
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
@@ -994,30 +1019,6 @@ class Main(object):
         self.logFile = os.path.join(self.dirLog, logName)
         # self.logPre = os.path.join(self.dirLog, logPre)
         # self.outFile = os.path.join(self.dirOut, outName)
-
-    def checkArgv(self):
-        if self.argc < 2:
-            self.usage()
-        argvs = sys.argv[1:]
-        self.checkFile = sys.argv[1]
-
-        # try:
-        #     opts, arvs = getopt.getopt(argvs, "c:t:h:")
-        # except getopt.GetoptError, e:
-        #     print 'get opt error:%s. %s' % (argvs, e)
-        #     self.usage()
-        # self.cmd = 'q'
-        # self.objType = 'h'
-        # self.host = 'a'
-        # for opt, arg in opts:
-        #     if opt == '-c':
-        #         self.cmd = arg
-        #     elif opt == '-t':
-        #         self.objType = arg
-        #     elif opt == '-h':
-        #         self.host = arg
-        # if len(arvs) > 0:
-        #     self.obj = arvs[0]
 
     def usage(self):
         print "Usage: %s datafile" % self.baseName

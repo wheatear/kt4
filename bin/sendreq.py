@@ -480,7 +480,7 @@ class KtPsClient(HttpShortClient):
     dSql['SendPs'] = 'insert into %s_%s (ps_id,busi_code,done_code,ps_type,prio_level,ps_service_type,bill_id,sub_bill_id,sub_valid_date,create_date,status_upd_date,action_id,ps_param,ps_status,op_id,region_code,service_id,sub_plan_no,RETRY_TIMES,notes) values(:PS_ID,0,:DONE_CODE,0,80,:PS_SERVICE_TYPE,:BILL_ID,:SUB_BILL_ID,sysdate,:CREATE_DATE,sysdate,:ACTION_ID,:PS_PARAM,0,530,:REGION_CODE,100,0,5,:NOTES)'
     dSql['RecvPs'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where ps_id=:PS_ID order by end_date desc'
     dSql['AsyncStatus'] = 'select ps_id,ps_status,fail_reason from ps_provision_his_%s_%s where create_date>=:firstDate and create_date<=:lastDate'
-
+    dSql['SyncServ'] = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort' and b.state=1"
 
     def __init__(self, netInfo):
         self.dNetInfo = netInfo
@@ -527,6 +527,7 @@ class KtPsClient(HttpShortClient):
                 m = re.search(pattern, psParam)
                 if m is not None:
                     rpl = ';%s=%s;' % (para, order.dParam[para])
+                    logging.debug('replace para: %s', rpl)
                     cmd.cmdTmpl['PS_PARAM'] = psParam.replace(m.group(), rpl)
 
     def getOrderId(self, order):
@@ -771,7 +772,7 @@ class KtPsFFac(FileFac):
 class TableFac(FileFac):
     dSql = {}
     dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where status=1 order by sort'
-    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where status=1 and ps_id=:PS_ID order by sort'
+    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where ps_id=:PS_ID order by sort'
     dCur = {}
     def __init__(self, main):
         super(self.__class__, self).__init__(main)
@@ -866,53 +867,14 @@ class Main(object):
         self.conn = None
         self.psId = None
 
-    def parseWorkEnv(self):
+    def checkArgv(self):
         dirBin, appName = os.path.split(self.Name)
         self.dirBin = dirBin
         self.appName = appName
-        # print('0 bin: %s   appName: %s    name: %s' % (dirBin, appName, self.Name))
-        appNameBody, appNameExt = os.path.splitext(appName)
+        appNameBody, appNameExt = os.path.splitext(self.appName)
         self.appNameBody = appNameBody
         self.appNameExt = appNameExt
 
-        self.dirApp = None
-        if dirBin == '' or dirBin == '.':
-            dirBin = '.'
-            dirApp = '..'
-            self.dirBin = dirBin
-            self.dirApp = dirApp
-        else:
-            dirApp, dirBinName = os.path.split(dirBin)
-            # print('dirapp: %s' % dirApp)
-            if dirApp == '':
-                dirApp = '.'
-                self.dirBin = dirBin
-                self.dirApp = dirApp
-            else:
-                self.dirApp = dirApp
-        # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
-        self.dirLog = os.path.join(self.dirApp, 'log')
-        self.dirCfg = os.path.join(self.dirApp, 'config')
-        self.dirTpl = os.path.join(self.dirApp, 'template')
-        self.dirLib = os.path.join(self.dirApp, 'lib')
-        self.dirInput = os.path.join(self.dirApp, 'input')
-        self.dirOutput = os.path.join(self.dirApp, 'output')
-
-        # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
-        self.today = time.strftime("%Y%m%d", time.localtime())
-        cfgName = '%s.cfg' % self.appNameBody
-        logName = '%s_%s.log' % (self.appNameBody, self.today)
-        logNamePre = '%s_%s' % (self.appNameBody, self.today)
-        outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
-        self.cfgFile = os.path.join(self.dirCfg, cfgName)
-        self.logFile = os.path.join(self.dirLog, logName)
-        self.logPre = os.path.join(self.dirLog, logNamePre)
-        self.outFile = os.path.join(self.dirOutput, outFileName)
-        # logging.info('outfile: %s', self.outFile)
-
-    def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
-        self.appName = appName
         if self.argc < 3:
             self.usage()
         # self.checkopt()
@@ -938,6 +900,37 @@ class Main(object):
             self.dsIn = arvs[0]
         # self.logFile = '%s%s' % (self.dsIn, '.log')
         # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
+
+    def parseWorkEnv(self):
+        if self.dirBin=='' or self.dirBin=='.':
+            self.dirBin = '.'
+            self.dirApp = '..'
+        else:
+            dirApp, dirBinName = os.path.split(self.dirBin)
+            if dirApp=='':
+                self.dirApp = '.'
+            else:
+                self.dirApp = dirApp
+
+        # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
+        self.dirLog = os.path.join(self.dirApp, 'log')
+        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirLib = os.path.join(self.dirApp, 'lib')
+        self.dirInput = os.path.join(self.dirApp, 'input')
+        self.dirOutput = os.path.join(self.dirApp, 'output')
+
+        # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
+        self.today = time.strftime("%Y%m%d", time.localtime())
+        cfgName = '%s.cfg' % self.appNameBody
+        logName = '%s_%s.log' % (self.appNameBody, self.today)
+        logNamePre = '%s_%s' % (self.appNameBody, self.today)
+        outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
+        self.cfgFile = os.path.join(self.dirCfg, cfgName)
+        self.logFile = os.path.join(self.dirLog, logName)
+        self.logPre = os.path.join(self.dirLog, logNamePre)
+        self.outFile = os.path.join(self.dirOutput, outFileName)
+        # logging.info('outfile: %s', self.outFile)
 
     def usage(self):
         print "Usage: %s [-t] cmdfile [-p psid] datafile" % self.appName
