@@ -258,6 +258,15 @@ class KtSender(threading.Thread):
         return aFildName
 
     def run(self):
+        if len(self.aFiles) == 0:
+            logging.info('no data file, redo template.')
+            line = ''
+            fi = self.builder.main.cmdTpl
+            order = KtOrder(line, fi)
+            self.kt.sendOrder(order)
+            self.orderQueue.put(order, 1)
+            return
+
         for fi in self.aFiles:
             # fileBody, fileExt = os.path.splitext(fi)
             # aCmdTpl = self.builder.dFildCmdMap[fileExt]
@@ -290,7 +299,6 @@ class KtSender(threading.Thread):
                 order.setPara(aPara)
                 self.kt.sendOrder(order)
                 self.orderQueue.put(order, 1)
-
             fp.close()
             logging.info('read %s complete, and delete.', fi)
             os.remove(fi)
@@ -373,8 +381,10 @@ class KtRecver(threading.Thread):
             psId = rsp[0]
             psStatus = rsp[1]
             failReason = rsp[2]
-            sRsp = '%d %d %s %s' % (psId, psStatus, sRsp, failReason)
-        fp.write('%s%s' % (sRsp, os.linesep))
+            # sRsp = '%d %d %s %s' % (psId, psStatus, sRsp, failReason)
+            sRsp = '%d %d %s %s' % (psId, psStatus, order.line, failReason)
+            fp.write('%s%s' % (sRsp, os.linesep))
+        # fp.write('%s%s' % (sRsp, os.linesep))
         logging.debug(sRsp)
 
     def dealFile(self, aFileInfo):
@@ -1252,6 +1262,16 @@ class KtPsFFac(object):
         return self.aFiles
 
     def lineCount(self):
+        if len(self.aFiles) == 0:
+            fileBase = self.main.cmdTpl
+            fileRsp = '%s.rsp' % self.main.cmdTpl
+            fileWkRsp = os.path.join(self.main.dirWork, fileRsp)
+            fWkRsp = self.main.openFile(fileWkRsp, 'w')
+            fileOutRsp = os.path.join(self.main.dirOut, fileRsp)
+            count = 1
+            self.dFiles[fileBase] = [fileBase, count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp]
+            logging.info('file: %s %d', fileBase, count)
+            return self.dFiles
         for fi in self.aFiles:
             fileBase = os.path.basename(fi)
             nameBody,nameExt = os.path.splitext(fileBase)
@@ -1559,8 +1579,15 @@ class Main(object):
         # self.outFile = os.path.join(self.dirOut, outName)
 
     def usage(self):
-        print "Usage: %s [-t|f orderTmpl] [-p|r psid|all] [datafile]" % self.appName
-        print "example:  %s -t ps_model_summary" % (self.appName)
+        print "Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName
+        print('option:')
+        print('-t orderTmpl : 指令模板表orderTmpl，默认表是ps_model_summary')
+        print('-f orderTmpl : 指令模板文件orderTmpl')
+        print('-p psid : 取表中ps_id为psid的记录为模板，没有这个参数取整个表为模板')
+        print('datafile : 数据文件，取里面的号码替换掉模板中的号码发开通')
+        print "example:"
+        print "\t%s -t ps_model_summary" % (self.appName)
+        print "\t%s pccnum" % (self.appName)
         print "\t%s -f kt_hlr" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName)
