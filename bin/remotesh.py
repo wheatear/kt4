@@ -270,7 +270,7 @@ class ReShFac(object):
         self.hosts = main.hosts
         # self.dest = dest
 
-    def loadCmd(self):
+    def buildCmd(self):
         logging.info('create cmd from %s', self.cmdFile)
         fCmd = self.main.openFile(self.cmdFile,'r')
         if not fCmd: return None
@@ -410,7 +410,7 @@ class Director(object):
             i += 1
             logging.debug('timeer %f host %s', time.time(), hostName)
             host = dHosts[hostName]
-            reSh = self.factory.buildAcConsole(host, scmd)
+            reSh = self.factory.makeReSh(host, scmd)
             aReSh.append(reSh)
             reSh.start()
         logging.info('start %d remotesh.', i)
