@@ -238,41 +238,36 @@ class KtOrder(object):
             status = '%s[%s:%s]' % (status, resp['status'], resp['response'])
         return status
 
-class CheckRead(threading.Thread):
-    sqlPsid = "select SEQ_PS_ID.NEXTVAL FROM dual"
+class KtSender(threading.Thread):
     def __init__(self, builder):
         threading.Thread.__init__(self)
         self.builder = builder
         self.main = builder.main
-        self.conn = self.main.conn
+        # self.conn = self.builder.makeConn('SENDER')
         self.aFiles = builder.aFiles
         self.dFiles = builder.dFiles
-        self.kt = builder.kt
+        self.kt = builder.makeKtClient('SENDER')
         self.orderQueue = builder.orderQueue
         self.curPsid = self.conn.prepareSql(self.sqlPsid)
 
-    def loadPsId(self):
-        sql = self.sqlPsid
-        para = None
-        # cur = self.conn.prepareSql(sql)
-        self.conn.executeCur(self.curPsid, para)
-        row = self.conn.fetchone(self.curPsid)
-        psId = row[0]
-        return psId
+    def makeOrderFildName(self, fIn):
+        fildName = fIn.readline()
+        logging.info('field: %s', fildName)
+        fildName = fildName.upper()
+        aFildName = fildName.split()
+        return aFildName
 
     def run(self):
         for fi in self.aFiles:
             # fileBody, fileExt = os.path.splitext(fi)
             # aCmdTpl = self.builder.dFildCmdMap[fileExt]
             logging.info('process file %s', fi)
-            tplName = self.dFiles[fi][2]
-            if tplName not in self.builder.dCmdTplGrp:
-                logging.error('no cmd template for %s', fi)
-                exit
-            self.kt.aCmdTemplates = self.builder.dCmdTplGrp[tplName]
+            aTpl = self.dFiles[fi][2]
+            self.kt.aCmdTemplates = aTpl
 
             i = 0
             fp = self.main.openFile(fi, 'r')
+            aFieldName = self.makeOrderFildName(fp)
             for line in fp:
                 line = line.strip()
                 if len(line) < 1:
@@ -286,13 +281,13 @@ class CheckRead(threading.Thread):
                         time.sleep(10)
                 logging.debug(line)
                 aPara = line.split()
-                billId = aPara[2]
-                subBillId = aPara[1]
-                aFieldName = ['BILL_ID', 'SUB_BILL_ID']
-                aKtPara = [billId, subBillId]
+                # billId = aPara[2]
+                # subBillId = aPara[1]
+                # aFieldName = ['BILL_ID', 'SUB_BILL_ID']
+                # aKtPara = [billId, subBillId]
                 order = KtOrder(line, fi)
                 order.setParaName(aFieldName)
-                order.setPara(aKtPara)
+                order.setPara(aPara)
                 self.kt.sendOrder(order)
                 self.orderQueue.put(order, 1)
 
@@ -301,17 +296,18 @@ class CheckRead(threading.Thread):
             os.remove(fi)
 
 
-class CheckWrite(threading.Thread):
+class KtRecver(threading.Thread):
     def __init__(self, builder):
         threading.Thread.__init__(self)
+        self.builder = builder
         self.main = builder.main
         self.aFiles = builder.aFiles
         self.dFiles = builder.dFiles
-        self.kt = builder.kt
+        self.kt = builder.makeKtClient('RECVER')
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
         self.doneOrders = {}
-        self.pattImsi = re.compile(r'IMSI1=(\d{15});')
+        # self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
         if len(self.dFiles) == 0:
@@ -323,11 +319,14 @@ class CheckWrite(threading.Thread):
         i = 0
         while 1:
             order = None
+            if len(self.dFiles) == 0:
+                break
             if self.orderQueue.empty():
                 emptyCounter += 1
                 if emptyCounter > 20:
                     logging.info('exceed 20 times empty, exit.')
                     break
+                time.sleep(30)
                 continue
             i += 1
             if i > 199:
@@ -346,8 +345,6 @@ class CheckWrite(threading.Thread):
                 logging.info('file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
                 aFileInfo = self.dFiles.pop(inFile)
                 self.dealFile(aFileInfo)
-            if len(self.dFiles) == 0:
-                break
 
     def checkSub(self, orderRsp, inFile):
         rsp = orderRsp[3]
@@ -365,16 +362,13 @@ class CheckWrite(threading.Thread):
     def makeRsp(self, order):
         inFile = order.file
         fp = self.dFiles[inFile][4]
+        sRsp = order.line
         for rsp in order.aResp:
+            psId = rsp[0]
             psStatus = rsp[1]
             failReason = rsp[2]
-            if psStatus == 9:
-                continue
-            if failReason.find('Subscriber not defined, KI not loaded') > -1:
-                continue
-            if psStatus < 9:
-                fp.write('%s%s' % (order.line, os.linesep))
-                break
+            sRsp = '%d %d %s' % (psId, psStatus, sRsp)
+        fp.write('%s%s' % (sRsp, os.linesep))
 
     def dealFile(self, aFileInfo):
         # self.dFiles[fi] = [fileBase,count, cmdTpl, fileWkRsp, fWkRsp, fileOutRsp]
@@ -462,9 +456,9 @@ class KtClient(object):
     dSql['SyncServ'] = "select substr(a.class,9),c.rpc_ip,a.value from kt4.sys_config a, kt4.sys_machine_process b, kt4.rpc_register c where substr(a.class,9)=b.process_name and b.machine_name=c.machine_name and c.app_name='appControl' and a.class like 'spliter|sync_split%' and a.name='ServicePort' and b.state=1"
     dSql['TradeId'] = 'select SEQ_PS_ID.NEXTVAL FROM (select 1 from all_objects where rownum <= :PSNUM)'
 
-    def __init__(self, conn, writeConn):
+    def __init__(self, conn):
         self.conn = conn
-        self.writeConn = writeConn
+        # self.writeConn = writeConn
         self.orderTablePre = 'i_provision'
         self.orderHisTablePre = 'ps_provision'
         self.syncServer = None
@@ -562,12 +556,14 @@ class KtClient(object):
             sql = self.dSql[namePre] % (regionCode)
         else:
             sql = self.dSql[curName]
-        if curName[:6] == 'RecvPs':
-            cur = self.writeConn.prepareSql(sql)
-        else:
-            cur = self.conn.prepareSql(sql)
+        cur = self.conn.prepareSql(sql)
         self.dCur[curName] = cur
         return cur
+
+    def closeAllCur(self):
+        for curId in self.dCur.keys():
+            cur = self.dCur.pop(curId)
+            cur.close()
 
     def prepareTmpl(self):
         return True
@@ -576,12 +572,12 @@ class KtClient(object):
         order.aReq = copy.deepcopy(self.aCmdTemplates)
         dtNow = datetime.datetime.now()
         for cmd in order.aReq:
-            for field in cmd.cmdTmpl:
+            for field in cmd:
                 if field in order.dParam:
-                    cmd.cmdTmpl[field] = order.dParam[field]
-            cmd.cmdTmpl['CREATE_DATE'] = dtNow
+                    cmd[field] = order.dParam[field]
+            cmd['CREATE_DATE'] = dtNow
             # cmd['tableMonth'] = dtNow.strftime('%Y%m')
-            psParam = cmd.cmdTmpl['PS_PARAM']
+            psParam = cmd['PS_PARAM']
             for para in order.dParam:
                 pattern = r'[;^]%s=(.*?);' % para
                 m = re.search(pattern, psParam)
@@ -602,8 +598,8 @@ class KtClient(object):
         for i,cmd in enumerate(order.aReq):
             psId = rows[i][0]
             doneCode = rows[i][1]
-            cmd.cmdTmpl['PS_ID'] = psId
-            cmd.cmdTmpl['DONE_CODE'] = doneCode
+            cmd['PS_ID'] = psId
+            cmd['DONE_CODE'] = doneCode
             waitPs = {'PS_ID': psId}
             logging.debug('psid: %d %d', psId, i)
             aWaitPs[i] = waitPs
@@ -623,7 +619,7 @@ class KtClient(object):
         if row:
             order.dParam['REGION_CODE'] = row[0]
         for req in order.aReq:
-            req.cmdTmpl['REGION_CODE'] = order.dParam['REGION_CODE']
+            req['REGION_CODE'] = order.dParam['REGION_CODE']
 
     def sendOrder(self, order):
         self.setOrderCmd(order)
@@ -636,26 +632,16 @@ class KtClient(object):
         for req in order.aReq:
             # aParam.append(req.cmdTmpl)
             # logging.debug('order cmd: %s', req.cmdTmpl)
-            cmd = req.cmdTmpl
-            cmd['NOTES'] = 'kidel.py %s : %s' % (cmd.pop('PS_MODEL_NAME'), cmd.pop('OLD_PS_ID'))
-            aParam = [req.cmdTmpl]
-            self.conn.executemanyCur(cur, aParam)
-            cur.connection.commit()
-            # time.sleep(3)
-        # logging.debug(aParam)
-        # self.conn.executemanyCur(cur, aParam)
-        # cur.connection.commit()
-        # for req in order.aReqMsg:
-        #     req['REGION_CODE'] = order.dParam['REGION_CODE']
-        #     logging.debug('send:%s', req)
-        #     self.remoteServer.send(req)
-        #     self.recvResp(order)
+            req['NOTES'] = 'sendkt.py %s : %s' % (req.pop('PS_MODEL_NAME'), req.pop('OLD_PS_ID'))
+
+        self.conn.executemanyCur(cur, order.aReq)
+        cur.connection.commit()
 
     def recvOrder(self, order):
         # self.connectServer()
         regionCode = order.dParam['REGION_CODE']
         # month = time.strftime("%Y%m", time.localtime())
-        month = order.aReq[0].cmdTmpl['CREATE_DATE'].strftime('%Y%m')
+        month = order.aReq[0]['CREATE_DATE'].strftime('%Y%m')
         curName = 'RecvPs%s_%s' % (regionCode, month)
         cur = self.getCurbyName(curName)
         aPsid = order.aWaitPs
@@ -675,20 +661,6 @@ class KtClient(object):
             order.aResp[i] = row
             order.aWaitPs.pop(i)
         logging.info('get %d result, remain %d ps', j, len(order.aWaitPs))
-        # while (len(aPsid) > 0):
-        #     self.conn.executemanyCur(cur, aPsid)
-        #     rows = self.conn.fetchall(cur)
-        #     for row in rows:
-        #         psId = row[0]
-        #         psStatus = row[1]
-        #         failReason = row[2]
-        #         indx = order.dWaitNo[psId]
-        #         order.aResp[indx] = row
-        #         order.aWaitPs.pop(indx)
-        #     num = len(rows)
-        #     aPsid = order.aWaitPs
-        #     logging.info('get %d result, remain %d ps', num, len(aPsid))
-        #     time.sleep(30)
 
 
 class AcConsole(threading.Thread):
@@ -887,9 +859,9 @@ class AcConsole(threading.Thread):
 
 class Builder(object):
 
-    def __init__(self, main, inFile):
+    def __init__(self, main):
         self.main = main
-        self.inFile = inFile
+        self.inFile = main.inFile
         self.conn = main.conn
         self.writeConn = main.writeConn
         self.aFiles = []
@@ -1098,22 +1070,37 @@ class Builder(object):
 
 
 class DbConn(object):
-    def __init__(self, dbInfo):
+    dConn = {}
+
+    # def __new__(cls, *args, **kw):
+    #     if not hasattr(cls, '_instance'):
+    #         old = super(DbConn, cls)
+    #         cls._instance = old.__new__(cls, *args, **kw)
+    #     return cls._instance
+
+    def __init__(self, connId, dbInfo):
+        self.connId = connId
         self.dbInfo = dbInfo
-        self.conn = None
+        self.dCur = {}
+        if connId in DbConn.dConn:
+            self.conn = DbConn.dConn[connId]
+        else:
+            self.connectServer()
         # self.connectServer()
 
     def connectServer(self):
         if self.conn: return self.conn
-        # if self.remoteServer: return self.remoteServer
-        connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
+        connstr = '%s/%s@%s/%s' % (
+        self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
         try:
             self.conn = orcl.Connection(connstr)
             # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
             # dsn = dsn.replace('SID=', 'SERVICE_NAME=')
             # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
+            DbConn.dConn[self.connId] = self.conn
         except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.dbInfo['dbhost'], self.dbInfo['dbusr'], self.dbInfo['dbsid'], e)
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'],
+                          self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
             exit()
         return self.conn
 
@@ -1128,69 +1115,81 @@ class DbConn(object):
         return cur
 
     def executemanyCur(self, cur, params):
-        # logging.info('execute cur %s : %s', cur.statement, params)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             cur.executemany(None, params)
         except orcl.DatabaseError, e:
-            logging.error('executemany sql err %s:%s ', e, cur.statement)
+            logging.error('execute sql err %s:%s ', e, cur.statement)
             return None
         return cur
 
+    def fetchmany(self, cur):
+        logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
+        try:
+            rows = cur.fetchmany()
+        except orcl.DatabaseError, e:
+            logging.error('fetch sql err %s:%s ', e, cur.statement)
+            return None
+        return rows
+
+    def fetchone(self, cur):
+        logging.debug('fethone from %s', cur.statement)
+        try:
+            row = cur.fetchone()
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return row
+
+    def fetchall(self, cur):
+        logging.debug('fethone from %s', cur.statement)
+        try:
+            rows = cur.fetchall()
+        except orcl.DatabaseError, e:
+            logging.error('execute sql err %s:%s ', e, cur.statement)
+            return None
+        return rows
+
     def executeCur(self, cur, params=None):
-        # logging.info('execute cur %s', cur.statement)
+        logging.info('execute cur %s', cur.statement)
         try:
             if params is None:
                 cur.execute(None)
             else:
                 cur.execute(None, params)
         except orcl.DatabaseError, e:
-            logging.error('execute sql err %s:%s %s', e, cur.statement, params)
+            logging.error('execute sql err %s:%s ', e, cur.statement)
             return None
         return cur
 
-    def fetchmany(self, cur):
-        # logging.debug('fetch %d rows from %s', cur.arraysize, cur.statement)
-        try:
-            rows = cur.fetchmany()
-        except orcl.DatabaseError, e:
-            logging.error('fetchmany sql err %s:%s ', e, cur.statement)
-            return None
-        return rows
+    def close(self):
+        logging.info('close conn %s', self.connId)
+        conn = DbConn.dConn.pop(self.connId)
+        conn.close()
 
-    def fetchone(self, cur):
-        # logging.debug('fethone from %s', cur.statement)
-        try:
-            row = cur.fetchone()
-        except orcl.DatabaseError, e:
-            logging.error('fetchone sql err %s:%s ', e, cur.statement)
-            return None
-        return row
-
-    def fetchall(self, cur):
-        # logging.debug('feth all from %s', cur.statement)
-        try:
-            rows = cur.fetchall()
-        except orcl.DatabaseError, e:
-            logging.error('fetchall sql err %s:%s ', e, cur.statement)
-            return None
-        return rows
+    def closeAll(self):
+        logging.info('close all conn')
+        for cId in DbConn.dConn.keys():
+            logging.debug('close conn %s', cId)
+            conn = DbConn.dConn.pop(cId)
+            conn.close()
 
 
 class Director(object):
-    def __init__(self, builder):
-        self.builder = builder
+    def __init__(self, fac):
+        self.factory = fac
         self.shutDown = None
         self.fRsp = None
 
     def start(self):
         logging.info('find in files')
-        self.builder.findFile()
-        self.builder.lineCount()
-        self.builder.loadCmd()
-        self.builder.buildKtClient()
-        queue = self.builder.buildQueue()
-        reader = self.builder.buildCheckRead()
-        writer = self.builder.buildCheckWrite()
+        self.factory.findFile()
+        self.factory.lineCount()
+        self.factory.loadCmd()
+        # self.factory.buildKtClient()
+        queue = self.factory.buildQueue()
+        reader = self.factory.buildKtSender()
+        writer = self.factory.buildKtRecver()
 
         logging.info('reader start.')
         reader.start()
@@ -1201,6 +1200,263 @@ class Director(object):
         logging.info('reader complete.')
         writer.join()
         logging.info('writer complete.')
+
+
+class KtPsTmpl(object):
+    def __init__(self, cmdTmpl):
+        # super(self.__class__, self).__init__(cmdTmpl)
+        self.cmdTmpl = cmdTmpl
+        self.varExpt = r'@(.+?)@'
+
+    def setMsg(self, tmpl):
+        pass
+        # self.cmdTmpl = tmpl
+        # for field in tmpl:
+        #     self.aVariables = re.findall(self.varExpt, self.cmdTmpl)
+
+
+class FileFac(object):
+    def __init__(self, main):
+        self.main = main
+        self.netType = main.netType
+        self.netCode = main.netCode
+        self.cmdTpl = main.cmdTpl
+        self.inFile = main.inFile
+        # self.orderDs = None
+        self.aNetInfo = []
+        self.dNetClient = {}
+        self.respName = '%s.rsp' % os.path.basename(self.main.outFile)
+        self.respFullName = os.path.join(self.main.dirOutput, self.respName)
+        self.resp = None
+        self.aCmdTemplates = []
+
+    def findFile(self):
+        logging.info('find files ')
+        filePatt = os.path.join(self.main.dirIn, self.inFile)
+        self.aFiles = glob.glob(filePatt)
+        logging.info('find files: %s', self.aFiles)
+        return self.aFiles
+
+    def lineCount(self):
+        for fi in self.aFiles:
+            fileBase = os.path.basename(fi)
+            nameBody,nameExt = os.path.splitext(fileBase)
+            # cmdTpl = self.dFildCmdMap[nameExt]
+            fileBack = os.path.join(self.main.dirBack, fileBase)
+            shutil.copy(fi, fileBack)
+            fileRsp = '%s.rsp' % fileBase
+            fileWkRsp = os.path.join(self.main.dirWork, fileRsp)
+            fWkRsp = self.main.openFile(fileWkRsp, 'w')
+            fileOutRsp = os.path.join(self.main.dirOut, fileRsp)
+
+            count = -1
+            for count, line in enumerate(open(fi, 'rU')):
+                pass
+            count += 1
+            self.dFiles[fi] = [fileBase,count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp]
+            logging.info('file: %s %d', fi, count)
+            # self.dFileSize[fi] = count
+        return self.dFiles
+
+    def loadCmd(self):
+        logging.info('loading cmd template %s', self.cmdTpl)
+        tplFile = os.path.join(self.main.dirTpl, self.cmdTpl)
+        fileName = os.path.basename(tplFile)
+        tplName = os.path.splitext(fileName)[0]
+        aCmdTmpl = []
+        tmplCmd = {}
+        i = 0
+        fCmd = self.main.openFile(tplFile, 'r')
+        for line in fCmd:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            if line == '$END$':
+                if len(tmplCmd) > 0:
+                    i += 1
+                    tmplCmd['OLD_PS_ID'] = i
+                    tmplCmd['PS_MODEL_NAME'] = tplFile
+                    logging.info(tmplCmd)
+                    # tmpl = KtPsTmpl(tmplCmd)
+                    aCmdTmpl.append(tmplCmd)
+                    tmpl = None
+                    tmplCmd = {}
+                continue
+            if line == 'KT_REQUEST':
+                tmpl = None
+                tmplCmd = {}
+                continue
+            aParam = line.split(' ', 1)
+            if len(aParam) < 1:
+                continue
+            tmplCmd[aParam[0]] = aParam[1]
+        self.aCmdTemplates = aCmdTmpl
+
+    def makeConn(self, connId):
+        conn = DbConn(connId, self.main.cfg.dbinfo)
+        return conn
+
+    def makeKtClient(self, ktName):
+        conn = self.makeConn(ktName)
+        self.kt = KtClient(conn)
+        return self.kt
+
+    def buildQueue(self):
+        self.orderQueue = Queue.Queue(1000)
+        return self.orderQueue
+
+    def buildKtSender(self):
+        sender = KtSender(self)
+        return sender
+
+    def buildKtRecver(self):
+        recver = KtRecver(self)
+        return recver
+
+    def openDs(self):
+        if self.orderDs: return self.orderDs
+        logging.info('open ds %s', self.orderDsName)
+        self.orderDs = self.main.openFile(self.orderDsName, 'r')
+        if self.orderDs is None:
+            logging.fatal('Can not open orderDs file %s.', self.orderDsName)
+            exit(2)
+        return self.orderDs
+
+    def closeDs(self):
+        if self.orderDs:
+            self.orderDs.close()
+
+    def openRsp(self):
+        if self.resp: return self.resp
+        self.resp = self.main.openFile(self.respFullName, 'a')
+        logging.info('open response file: %s', self.respName)
+        if self.resp is None:
+            logging.fatal('Can not open response file %s.', self.respName)
+            exit(2)
+        return self.resp
+
+    def saveResp(self, order):
+        for rsp in order.aResp:
+            self.resp.write('%s %s%s' % (order.dParam['BILL_ID'], rsp, os.linesep))
+
+    def loadCmd(self):
+        tmpl = None
+        tmplMsg = ''
+        for line in self.main.fCmd:
+            line = line.strip()
+            if len(line) == 0:
+                if len(tmplMsg) > 0:
+                    logging.info(tmplMsg)
+                    tmpl = CmdTemplate(tmplMsg)
+                    logging.info(tmpl.aVariables)
+                    self.aCmdTemplates.append(tmpl)
+                    tmpl = None
+                    tmplMsg = ''
+                continue
+            tmplMsg = '%s%s' % (tmplMsg, line)
+        if len(tmplMsg) > 0:
+            logging.info(tmplMsg)
+            tmpl = CmdTemplate(tmplMsg)
+            logging.info(tmpl.aVariables)
+            self.aCmdTemplates.append(tmpl)
+
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        self.main.fCmd.close()
+
+    def makeNet(self):
+        cfg = self.main.cfg
+        if self.netType not in cfg.dNet:
+            logging.fatal('no find net type %s', self.netType)
+            exit(2)
+        self.aNetInfo = cfg.dNet[self.netType]
+        netClassName = '%sClient' % self.netType
+        logging.info('load %d net info.', len(self.aNetInfo))
+        for netInfo in self.aNetInfo:
+            # print netInfo
+            net = createInstance(self.main.appNameBody, netClassName, netInfo)
+            net.aCmdTemplates = self.aCmdTemplates
+            net.prepareTmpl()
+            # net.tmplReplaceNetInfo()
+            # net.makeHttpHead()
+            netCode = netInfo['NetCode']
+            self.dNetClient[netCode] = net
+        return self.dNetClient
+
+    def makeOrderFildName(self):
+        fildName = self.orderDs.readline()
+        logging.info('field: %s', fildName)
+        fildName = fildName.upper()
+        self.aFildName = fildName.split()
+
+    def makeOrder(self):
+        orderClassName = '%sOrder' % self.netType
+        logging.debug('load order %s.', orderClassName)
+        for line in self.orderDs:
+            line = line.strip()
+            logging.debug(line)
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            aParams = line.split()
+
+            order = createInstance(self.main.appNameBody, orderClassName)
+            order.setParaName(self.aFildName)
+            order.setPara(aParams)
+            logging.debug('order param: %s', order.dParam)
+            # netCode = self.aNetInfo[0]['NetCode']
+            order.net = self.dNetClient[self.netCode]
+            return order
+        return None
+
+
+class TableFac(FileFac):
+    dSql = {}
+    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where status=1 order by sort'
+    dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param,ps_model_name from %s where ps_id=:PS_ID order by sort'
+    dCur = {}
+    def __init__(self, main):
+        super(self.__class__, self).__init__(main)
+        self.respName = '%s_rsp' % os.path.basename(self.main.outFile)
+        self.respFullName = self.respName
+        self.conn = main.conn
+        self.cmdTab = self.main.cmdFile
+
+    def getCurbyName(self, curName):
+        if curName in self.dCur: return self.dCur[curName]
+        if curName not in self.dSql:
+            return None
+        sql = self.dSql[curName] % self.cmdTab
+        cur = self.conn.prepareSql(sql)
+        self.dCur[curName] = cur
+        return cur
+
+    def loadCmd(self):
+        tmpl = None
+        tmplMsg = ''
+        # sql = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by sort' % self.cmdTab
+        logging.info('load cmd template.')
+        para = None
+        if self.main.psId:
+            cur = self.getCurbyName('LOADTMPLBYPS')
+            para = {'PS_ID': self.main.psId}
+        else:
+            cur = self.getCurbyName('LOADTMPL')
+        self.conn.executeCur(cur, para)
+        rows = self.conn.fetchall(cur)
+        for line in rows:
+            cmd = {}
+            for i,field in enumerate(cur.description):
+                cmd[field[0]] = line[i]
+            cmd['OLD_PS_ID'] = cmd['PS_ID']
+            tmpl = KtPsTmpl(cmd)
+            self.aCmdTemplates.append(tmpl)
+            # logging.info(line)
+            logging.info('cmd template: %s', cmd)
+        cur.close()
+        logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
 
 
 class Main(object):
@@ -1224,27 +1480,30 @@ class Main(object):
         if self.argc < 2:
             self.usage()
             # self.inFile = 'wsdx_cycle_%s.cy?' % self.today
-        else:
-            self.inFile = sys.argv[1]
-        # argvs = sys.argv[1:]
-
+        # else:
+        #     self.inFile = sys.argv[1]
+        argvs = sys.argv[1:]
+        self.facType = 't'
+        self.cmdTmpl = 'ps_model_summary'
+        self.fCmd = None
+        self.tmplId = None
+        self.inFile = None
         try:
-            opts, arvs = getopt.getopt(argvs, "c:t:h:")
+            opts, arvs = getopt.getopt(argvs, "t:f:p:r:")
         except getopt.GetoptError, e:
             print 'get opt error:%s. %s' % (argvs, e)
             self.usage()
-        self.cmd = 'q'
-        self.objType = 'h'
-        self.host = 'a'
         for opt, arg in opts:
-            if opt == '-c':
-                self.cmd = arg
-            elif opt == '-t':
-                self.objType = arg
-            elif opt == '-h':
-                self.host = arg
+            if opt == '-t':
+                self.facType = 't'
+                self.cmdTmpl = arg
+            elif opt == '-f':
+                self.facType = 'f'
+                self.cmdTmpl = arg
+            elif opt == '-p':
+                self.tmplId = arg
         if len(arvs) > 0:
-            self.obj = arvs[0]
+            self.inFile = arvs[0]
 
     def parseWorkEnv(self):
         if self.dirBin=='' or self.dirBin=='.':
@@ -1279,8 +1538,8 @@ class Main(object):
 
     def usage(self):
         print "Usage: %s [-t|f orderTmpl] [-p|r psid|all] [datefile]" % self.appName
-        print "example:  %s -t %s" % (self.appName,'ps_model_summary')
-        print "\t%s -f %s" % (self.appName, 'kt_hlr')
+        print "example:  %s -t ps_model_summary" % (self.appName)
+        print "\t%s -f kt_hlr" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName)
         print "\t%s -f kt_hlr -p 2451845353 pccnum" % (self.appName)
@@ -1296,11 +1555,58 @@ class Main(object):
 
     def connectServer(self):
         if self.conn is not None: return self.conn
-        self.conn = DbConn(self.cfg.dbinfo)
+        self.conn = DbConn('main', self.cfg.dbinfo)
         self.conn.connectServer()
         self.writeConn = DbConn(self.cfg.dbinfo)
         self.writeConn.connectServer()
         return self.conn
+
+    # def getConn(self, connId):
+    #     conn = DbConn(connId, self.cfg.dbinfo)
+    #     return conn
+
+    def makeFactory(self):
+        if self.facType == 't':
+            return self.makeTableFactory()
+        elif self.facType == 'f':
+            return self.makeFileFactory()
+
+    def makeTableFactory(self):
+        self.netType = 'KtPs'
+        self.netCode = 'kt4'
+        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+        fac = TableFac(self)
+        return fac
+
+    def makeFileFactory(self):
+        if not self.fCmd:
+            self.fCmd = self.openFile(self.cmdTmpl, 'r')
+            logging.info('cmd template file: %s', self.cmdTmpl)
+            if not self.fCmd:
+                logging.fatal('can not open command file %s. exit.', self.cmdFile)
+                exit(2)
+
+        for line in self.fCmd:
+            if line[:8] == '#NETTYPE':
+                aType = line.split()
+                self.netType = aType[2]
+            if line[:8] == '#NETCODE':
+                aCode = line.split()
+                self.netCode = aCode[2]
+            if self.netType and self.netCode:
+                logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+                break
+        logging.info('net type: %s  net code: %s', self.netType, self.netCode)
+        if self.netType is None:
+            logging.fatal('no find net type,exit.')
+            exit(3)
+        # facName = '%sFac' % self.netType
+        # fac_meta = getattr(self.appNameBody, facName)
+        # fac = fac_meta(self)
+        facName = '%sFFac' % self.netType
+        fac = createInstance(self.appNameBody, facName, self)
+        # fac = FileFac(self)
+        return fac
 
     def start(self):
         self.checkArgv()
@@ -1316,10 +1622,18 @@ class Main(object):
 
         self.cfg.loadDbinfo()
         self.connectServer()
-        builder = Builder(self, self.inFile)
-        director = Director(builder)
+        factory = self.makeFactory()
+        print('respfile: %s' % factory.respFullName)
+        # builder = Builder(self)
+        director = Director(factory)
         director.start()
 
+
+def createInstance(module_name, class_name, *args, **kwargs):
+    module_meta = __import__(module_name, globals(), locals(), [class_name])
+    class_meta = getattr(module_meta, class_name)
+    obj = class_meta(*args, **kwargs)
+    return obj
 
 # main here
 if __name__ == '__main__':
