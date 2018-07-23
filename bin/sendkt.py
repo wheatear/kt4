@@ -346,7 +346,7 @@ class KtRecver(threading.Thread):
                 i = 0
                 time.sleep(3)
             order = self.orderQueue.get(1)
-            logging.debug('get order %s %d from queue', order.dParam['BILL_ID'], order.aReq[0]['PS_ID'])
+            logging.debug('get order %s %d from queue', order.aReq[0]['BILL_ID'], order.aReq[0]['PS_ID'])
             self.kt.recvOrder(order)
             if len(order.aWaitPs) > 0:
                 self.orderQueue.put(order, 1)
@@ -359,6 +359,7 @@ class KtRecver(threading.Thread):
                 logging.info('file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
                 aFileInfo = self.dFiles.pop(inFile)
                 self.dealFile(aFileInfo)
+            time.sleep(1)
 
     def checkSub(self, orderRsp, inFile):
         rsp = orderRsp[3]
@@ -629,45 +630,62 @@ class KtClient(object):
     def getRegionCode(self, order):
         # sql = self.__class__.dSql['RegionCode']
         cur = self.getCurbyName('RegionCode')
-        if 'BILL_ID' not in order.dParam: return False
-        dVar = {'BILL_ID':order.dParam['BILL_ID']}
-        self.conn.executeCur(cur, dVar)
-        row = self.conn.fetchone(cur)
-        order.dParam['REGION_CODE'] = '100'
-        if row:
-            order.dParam['REGION_CODE'] = row[0]
+        # if 'BILL_ID' not in order.dParam: return False
+        if 'BILL_ID' in order.dParam:
+            dVar = {'BILL_ID':order.dParam['BILL_ID']}
+            self.conn.executeCur(cur, dVar)
+            row = self.conn.fetchone(cur)
+            order.dParam['REGION_CODE'] = '100'
+            if row:
+                order.dParam['REGION_CODE'] = row[0]
         for req in order.aReq:
-            req['REGION_CODE'] = order.dParam['REGION_CODE']
+            if 'REGION_CODE' in order.dParam:
+                req['REGION_CODE'] = order.dParam['REGION_CODE']
+            else:
+                dVar = {'BILL_ID': req['BILL_ID']}
+                self.conn.executeCur(cur, dVar)
+                row = self.conn.fetchone(cur)
+                if row:
+                    req['REGION_CODE'] = row[0]
+                else:
+                    req['REGION_CODE'] = '100'
 
     def sendOrder(self, order):
         self.setOrderCmd(order)
         self.getOrderId(order)
         self.getRegionCode(order)
-        curName = 'SendPs%s' % order.dParam['REGION_CODE']
-        cur = self.getCurbyName(curName)
+        if 'REGION_CODE' in order.dParam:
+            curName = 'SendPs%s' % order.dParam['REGION_CODE']
+            cur = self.getCurbyName(curName)
         # logging.debug(order.aReqMsg)
         aParam = []
         for req in order.aReq:
             # aParam.append(req.cmdTmpl)
             # logging.debug('order cmd: %s', req.cmdTmpl)
             req['NOTES'] = 'sendkt.py %s : %s' % (req.pop('PS_MODEL_NAME'), req.pop('OLD_PS_ID'))
-
-        self.conn.executemanyCur(cur, order.aReq)
-        cur.connection.commit()
+            if 'REGION_CODE' not in order.dParam:
+                curName = 'SendPs%s' % req['REGION_CODE']
+                cur = self.getCurbyName(curName)
+                self.conn.executeCur(cur, req)
+                cur.connection.commit()
+        if 'REGION_CODE' in order.dParam:
+            self.conn.executemanyCur(cur, order.aReq)
+            cur.connection.commit()
 
     def recvOrder(self, order):
         # self.connectServer()
-        regionCode = order.dParam['REGION_CODE']
-        # month = time.strftime("%Y%m", time.localtime())
-        month = order.aReq[0]['CREATE_DATE'].strftime('%Y%m')
-        curName = 'RecvPs%s_%s' % (regionCode, month)
-        cur = self.getCurbyName(curName)
         aPsid = order.aWaitPs
         j = 0
         for i,psId in enumerate(aPsid):
+            pId = psId['PS_ID']
+            k = order.dWaitNo[pId]
+            regionCode = order.aReq[k]['REGION_CODE']
+            # month = time.strftime("%Y%m", time.localtime())
+            month = order.aReq[k]['CREATE_DATE'].strftime('%Y%m')
+            curName = 'RecvPs%s_%s' % (regionCode, month)
+            cur = self.getCurbyName(curName)
             self.conn.executeCur(cur, psId)
             row = self.conn.fetchone(cur)
-        # for row in rows:
             if not row:
                 continue
             j += 1
@@ -676,8 +694,9 @@ class KtClient(object):
             failReason = row[2]
             # indx = order.dWaitNo[psId]
             logging.debug(row)
-            order.aResp[i] = row
+            order.aResp[k] = row
             order.aWaitPs.pop(i)
+            # print('after pop %d ,len psid: %d' % (i,len(aPsid)))
         logging.info('get %d result, remain %d ps', j, len(order.aWaitPs))
 
 
@@ -1170,7 +1189,7 @@ class DbConn(object):
         return rows
 
     def executeCur(self, cur, params=None):
-        logging.info('execute cur %s', cur.statement)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             if params is None:
                 cur.execute(None)
@@ -1450,7 +1469,7 @@ class KtPsFFac(object):
 
 class TableFac(KtPsFFac):
     dSql = {}
-    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where status=1 order by ps_id'
+    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s order by ps_id'
     dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where ps_id=:PS_ID'
     dCur = {}
     def __init__(self, main):
@@ -1581,9 +1600,9 @@ class Main(object):
     def usage(self):
         print "Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName
         print('option:')
-        print('-t orderTmpl : 指令模板表orderTmpl，默认表是ps_model_summary')
-        print('-f orderTmpl : 指令模板文件orderTmpl')
-        print('-p psid : 取表中ps_id为psid的记录为模板，没有这个参数取整个表为模板')
+        print('-t orderTmpl : 指定模板表orderTmpl，默认表是ps_model_summary')
+        print('-f orderTmpl : 指定模板文件orderTmpl')
+        print('-p psid : 取模板表中ps_id为psid的记录为模板，没有这个参数取整个表为模板')
         print('datafile : 数据文件，取里面的号码替换掉模板中的号码发开通')
         print "example:"
         print "\t%s -t ps_model_summary" % (self.appName)
