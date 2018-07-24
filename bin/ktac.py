@@ -539,11 +539,15 @@ class AcBuilder(object):
                 else:
                     acProcInfo[2] = self.getProcess(processName, aProcess)
             if aNets:
-                if netName not in aNets:
+                if not netName:
                     continue
+                aName = netName.split(',')
+                for nName in aName:
+                    if nName in aNets:
+                        break
                 else:
-                    acProcInfo[2] = '%s%s' % ('app_ne|busicomm|', processName)
-
+                    continue
+                acProcInfo[2] = '%s%s' % ('app_ne|busicomm|', processName)
             # acProcInfo = [host, row[1], acProcess, netName, procSort]
             if host in self.dProcess:
                 self.dProcess[host].append(acProcInfo)
