@@ -1600,17 +1600,17 @@ class Main(object):
     def usage(self):
         print "Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName
         print('option:')
-        print('-t orderTmpl : 指定模板表orderTmpl，默认表是ps_model_summary')
-        print('-f orderTmpl : 指定模板文件orderTmpl')
-        print('-p psid : 取模板表中ps_id为psid的记录为模板，没有这个参数取整个表为模板')
-        print('datafile : 数据文件，取里面的号码替换掉模板中的号码发开通')
+        print(u'-t orderTmpl : 指定模板表orderTmpl，默认表是ps_model_summary'.encode('gbk'))
+        print(u'-f orderTmpl : 指定模板文件orderTmpl'.encode('gbk'))
+        print(u'-p psid :      取模板表中ps_id为psid的记录为模板，没有这个参数取整个表为模板'.encode('gbk'))
+        print(u'datafile :     数据文件，取里面的号码替换掉模板中的号码发开通'.encode('gbk'))
         print "example:"
-        print "\t%s -t ps_model_summary" % (self.appName)
         print "\t%s pccnum" % (self.appName)
-        print "\t%s -f kt_hlr" % (self.appName)
+        print "\t%s -t ps_model_summary" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353" % (self.appName)
         print "\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName)
-        print "\t%s -f kt_hlr -p 2451845353 pccnum" % (self.appName)
+        print "\t%s -f kt_hlr" % (self.appName)
+        print "\t%s -f kt_hlr pccnum" % (self.appName)
         exit(1)
 
     def openFile(self, fileName, mode):

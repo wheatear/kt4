@@ -1,0 +1,20 @@
+#!/bin/sh
+
+#export LD_LIBRARY_PATH=/lib64:/usr/lib64:/usr/local/lib64
+#export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/app/kt4/lib
+
+export ORACLE_BASE=/opt/oracle/app/oracle/product
+export ORACLE_HOME=${ORACLE_BASE}/11.2.0/client_1
+export ORACLE_LPPROG=/usr/bin/lp
+export ORACLE_PAGER=/usr/bin/more
+export ORACLE_LPSTAT=/usr/bin/lpstat
+#export SHLIB_PATH=$ORACLE_HOME/lib:$SHLIB_PATH
+#export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+
+LANG=zh_CN
+LANGUAGE='zh_CN.GB18030:zh_CN.GB2312:zh_CN'
+export LANG LANGUAGE
+
+export PATH=/app/kt4/operation/bin:/app/kt4/local/python2.7/bin:/app/kt4/bin:/opt/oracle/app/oracle/product/11.2.0/client_1/bin:.:/bin:/usr/local/bin:/usr/bin:/usr/sbin
+export LD_LIBRARY_PATH=/opt/oracle/app/oracle/product/11.2.0/client_1/lib:/app/kt4/lib:/lib64:/usr/lib64:/usr/local/lib64
+

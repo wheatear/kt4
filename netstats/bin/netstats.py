@@ -711,11 +711,11 @@ class NetStati(object):
 
     def start(self):
         self.prepareEnv()
-        logging.info('1.取网元处理量统计数据...')
+        logging.info(u'1.取网元处理量统计数据...'.encode('gbk'))
         self.getNetCount()
-        logging.info('2.取网元处理时长数据...')
+        logging.info(u'2.取网元处理时长数据...'.encode('gbk'))
         self.getNetTime()
-        logging.info('3.插入统计表...')
+        logging.info(u'3.插入统计表...'.encode('gbk'))
         self.saveNetInfo()
         self.conn.close()
 
