@@ -285,6 +285,8 @@ class CheckWrite(threading.Thread):
             #     logging.debug('get order %d from queue', order.tradeId)
             orderRsp = self.kt.syncRecv()
             logging.debug(orderRsp)
+            if not orderRsp:
+                continue
             tradeId = int(orderRsp[0])
             logging.debug('get order %d from socket', tradeId)
 
