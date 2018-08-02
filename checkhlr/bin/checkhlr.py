@@ -449,14 +449,17 @@ class KtClient(object):
         # logging.debug(rspMsg)
         m = regx.search(rspMsg)
         orderRsp = None
-        if m is not None:
-            tridId = int(m.group(1))
-            errCode = int(m.group(2))
-            errDesc = m.group(3)
-            resp = m.group(4)
+        if not m:
+            logging.error('resp error: rspMsg')
+            return orderRsp
+        # if m is not None:
+        tridId = int(m.group(1))
+        errCode = int(m.group(2))
+        errDesc = m.group(3)
+        resp = m.group(4)
 
-            orderRsp = [tridId, errCode, errDesc, resp]
-            logging.debug('recv order response ,tradeId:%s, syncStatus:%d, syncDesc:%s, response:%s.', tridId,
+        orderRsp = [tridId, errCode, errDesc, resp]
+        logging.debug('recv order response ,tradeId:%s, syncStatus:%d, syncDesc:%s, response:%s.', tridId,
                           errCode, errDesc, resp)
         return orderRsp
 
