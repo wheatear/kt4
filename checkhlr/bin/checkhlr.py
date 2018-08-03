@@ -680,9 +680,13 @@ class Builder(object):
         logging.info('build checkread ')
         filePatt = os.path.join(self.main.dirIn, self.checkFile)
         self.aFiles = glob.glob(filePatt)
-        # for f in glob.iglob(filePatt):
-        #     fName = os.path.basename(f)
-        #     self.aFiles.append(fName)
+        for i,f in enumerate(self.aFiles):
+            fName = os.path.basename(f)
+            fileWk = os.path.join(self.main.dirWork, fName)
+            fileBack = os.path.join(self.main.dirBack, fName)
+            shutil.copy(f, fileBack)
+            os.rename(f, fileWk)
+            self.aFiles[i] = fileWk
         logging.info('check file: %s', self.aFiles)
         return self.aFiles
 
@@ -690,8 +694,7 @@ class Builder(object):
         for fi in self.aFiles:
             fileBase = os.path.basename(fi)
             fileNameBody, fileExt = os.path.splitext(fileBase)
-            fileBack = os.path.join(self.main.dirBack, fileBase)
-            shutil.copy(fi, fileBack)
+
             fileSuc = '%s_suc.txt' % fileNameBody
             fileErr = '%s_err.txt' % fileNameBody
             fileWkSuc = os.path.join(self.main.dirWork, fileSuc)
