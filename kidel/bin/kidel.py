@@ -372,6 +372,8 @@ class CheckWrite(threading.Thread):
                 continue
             if failReason.find('Subscriber not defined, KI not loaded') > -1:
                 continue
+            if failReason.find('KI not loaded') > -1:
+                continue
             if psStatus < 9:
                 fp.write('%s%s' % (order.line, os.linesep))
                 break
@@ -903,6 +905,13 @@ class Builder(object):
         logging.info('find files ')
         filePatt = os.path.join(self.main.dirIn, self.inFile)
         self.aFiles = glob.glob(filePatt)
+        for i,f in enumerate(self.aFiles):
+            fName = os.path.basename(f)
+            fileWk = os.path.join(self.main.dirWork, fName)
+            fileBack = os.path.join(self.main.dirBack, fName)
+            shutil.copy(f, fileBack)
+            os.rename(f, fileWk)
+            self.aFiles[i] = fileWk
         logging.info('find files: %s', self.aFiles)
         return self.aFiles
 
@@ -911,8 +920,8 @@ class Builder(object):
             fileBase = os.path.basename(fi)
             nameBody,nameExt = os.path.splitext(fileBase)
             cmdTpl = self.dFildCmdMap[nameExt]
-            fileBack = os.path.join(self.main.dirBack, fileBase)
-            shutil.copy(fi, fileBack)
+            # fileBack = os.path.join(self.main.dirBack, fileBase)
+            # shutil.copy(fi, fileBack)
             fileRsp = '%s.rsp' % fileBase
             fileWkRsp = os.path.join(self.main.dirWork, fileRsp)
             fWkRsp = self.main.openFile(fileWkRsp, 'w')
