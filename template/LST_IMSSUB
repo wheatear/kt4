@@ -1,0 +1,15 @@
+#NETTYPE = HttpShort
+#NETCODE = HSSHW6
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hss="http://www.chinamobile.com/HSS/">
+   <soapenv:Header>
+      <hss:PassWord>cnp200@HW</hss:PassWord>
+      <hss:UserName>boss</hss:UserName>
+   </soapenv:Header>
+   <soapenv:Body>
+      <hss:LST_IMSSUB>
+         <hss:HLRSN>6</hss:HLRSN>
+         <hss:IMPU>tel:+8613581703061</hss:IMPU>
+         <hss:DETAIL>TRUE</hss:DETAIL>
+      </hss:LST_IMSSUB>
+   </soapenv:Body>
+</soapenv:Envelope>

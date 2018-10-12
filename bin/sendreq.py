@@ -322,7 +322,7 @@ class HttpShortClient(object):
         resp['status'] = 'UNKNOWN'
         if 'RSP_SUCCESS' not in self.dNetInfo:
             order.aResp.append(resp)
-            logging.info('response %s %s %s' % (order.dParam['BILL_ID'], resp['status'], resp['response']))
+            logging.info('response %s' % ( resp['response']))
             return True
 
         if rspMsg.find(self.dNetInfo['RSP_SUCCESS']) > -1:
