@@ -1359,6 +1359,216 @@ class TableFac(KtPsFFac):
         logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
 
 
+class NumberArea(object):
+    def __init__(self):
+        self.startNumber = None
+        self.endNumber = None
+        self.psServiceType = 'HLR'
+        self.groupCode = '0'
+        self.regionCode = None
+        self.status = 1
+        self.doneDate = None
+        self.psNetCode = None
+        self.numberType = 1
+        self.smpRegionCode = '000'
+        self.remark = None
+        self.scpSegment = None
+        self.scpType = 1
+        self.describe = None
+        self.state = 1
+
+    def saveNumb(self):
+        pass
+
+
+class CsvBuilder(object):
+    dNumbFields = {'手机号段起始': 'startNumber',
+                   '手机号段终止': 'endNumber',
+                   '号段': 'numberSegment',
+                   '归属HLR/HSS': 'psNetCode',
+                   'VPMN SCP': 'scpSegment',
+                   }
+    sqlHss = 'select distinct ps_net_code,region_code from ps_net_number_area order by 1'
+    sqlScp = 'select distinct scp_code,scp_segment from PS_SCP_SEGMENT order by 1'
+    def __init__(self, file):
+        self.numbFile = file
+        self.fNumb = None
+        self.dFieldIndex = {}
+        self.type = None  # ordinary  virtual
+        self.numbArea = None
+        self.dScp = {}
+        self.dHss = {}
+
+    def openNumFile(self):
+        if self.fNumb:
+            return self.fNumb
+        logging.info('open number band file %s', self.numbFile)
+        self.fNumb = main.openFile(self.numbFile, 'r')
+        return self.fNumb
+
+    def closeNumFile(self):
+        if self.fNumb:
+            logging.info('close number band file %s', self.numbFile)
+            self.fNumb.close()
+
+    def loadScp(self):
+        logging.info('loading scp config')
+        cur = main.conn.prepareSql(self.sqlScp)
+        main.conn.executeCur(cur)
+        aScp = main.conn.fetchall(cur)
+        cur.close()
+        for scp in aScp:
+            self.dScp[scp[0]] = scp[1]
+
+    def loadRegion(self):
+        logging.info('loading hss region_code config')
+        cur = main.conn.prepareSql(self.sqlHss)
+        main.conn.executeCur(cur)
+        aHss = main.conn.fetchall(cur)
+        cur.close()
+        for hss in aHss:
+            self.dHss[hss[0]] = hss[1]
+
+    def loadNumbField(self):
+        self.openNumFile()
+        fildName = self.fNumb.readline()
+        fildName = fildName.strip()
+        if len(fildName) < 1:
+            self.loadNumbField()
+        logging.info('number segment file fields: %s', fildName)
+        # fildName = fildName.upper()
+        aFildName = fildName.split(',')
+        for i,field in enumerate(aFildName):
+            if field in self.dNumbFields:
+                if field == "手机号段起始":
+                    self.type = 'virtual'
+                elif field == "号段":
+                    self.type = 'ordiary'
+                self.dFieldIndex[self.dNumbFields[field]] = i
+        if self.type == 'ordinary' and len(self.dFieldIndex) < 3:
+            logging.error('no enough information in number file: %s(%s)', self.numbFile,fildName)
+            exit(-1)
+        if self.type == 'virtual' and len(self.dFieldIndex) < 4:
+            logging.error('no enough information in number file: %s(%s)', self.numbFile,fildName)
+            exit(-1)
+        # return aFildName
+
+    def loadNumber(self):
+        numbInfo = self.fNumb.readline()
+        numbInfo = numbInfo.strip()
+        if len(numbInfo) < 1:
+            self.loadNumber()
+        logging.info('load number: %s', numbInfo)
+        aNumbInfo = numbInfo.split(',')
+        if len(aNumbInfo) < 3:
+            logging.warn('no enough infomation in %s', numbInfo)
+            return None
+        for field in self.dFieldIndex:
+            indx = self.dFieldIndex[field]
+            val = aNumbInfo[indx].strip()
+            if len(val) < 1:
+                logging.warn('%s error: %s', field, numbInfo)
+                return None
+            aNumbInfo[indx] = val
+
+        self.numbArea = NumberArea()
+        if self.type == 'ordinary':
+            logging.info('loading ordinary number segment')
+            indx = self.dFieldIndex['numberSegment']
+            val = aNumbInfo[indx]
+            if not self.parseOrdinary(val):
+                logging.warn('ordinary number error: %s', val)
+                self.numbArea = None
+                return None
+        elif self.type == 'virtual':
+            logging.info('loading virtual operator number segment')
+            indxStart = self.dFieldIndex['startNumber']
+            valStart = aNumbInfo[indxStart]
+            indxEnd = self.dFieldIndex['endNumber']
+            valEnd = aNumbInfo[indxEnd]
+            if not self.parseVirtual(valStart, valEnd):
+                logging.warn('virtual operator number error: %s - %s', valStart, valEnd)
+                self.numbArea = None
+                return None
+
+        logging.info('loading hss code')
+        indx = self.dFieldIndex['psNetCode']
+        val = aNumbInfo[indx]
+        if not self.parseHss(val):
+            logging.warn('hss code error: %s', val)
+            self.numbArea = None
+            return None
+
+        logging.info('loading scp segment')
+        indx = self.dFieldIndex['scpSegment']
+        val = aNumbInfo[indx]
+        if not self.parseScp(val):
+            logging.warn('scp code error: %s', val)
+            self.numbArea = None
+            return None
+
+    def parseOrdinary(self, val):
+        val = val.replace(' ', '')
+        aNumb = val.split('-')
+        if len(aNumb) != 2:
+            logging.warn('number error: %s', val)
+            return False
+        for num in aNumb:
+            m = re.match('\d{11}$', num)
+            if m is None:
+                logging.warn('number error: %s', num)
+                return False
+        self.numbArea.startNumber = int(aNumb[0])
+        self.numbArea.endNumber = int(aNumb[1])
+
+    def parseVirtual(self, valStart, valEnd):
+        m = re.match('\d{11}$', valStart)
+        if m is None:
+            logging.warn('number error: %s', valStart)
+            return False
+        m = re.match('\d{11}$', valEnd)
+        if m is None:
+            logging.warn('number error: %s', valEnd)
+            return False
+        self.numbArea.startNumber = int(valStart)
+        self.numbArea.endNumber = int(valEnd)
+
+    def parseHss(self, val):
+        hssCode = val.split()[0]
+        hssNo = hssCode[-1]
+        if hssNo in ('1','2','3','4'):
+            hssCode = hssCode.replace('0','NSN')
+        elif hssNo in ('5','6','7','8'):
+            hssCode = hssCode.replace('0','HW')
+        else:
+            logging.warn('hsscode error: %s', val)
+            return False
+        if hssCode in self.dHss:
+            self.numbArea.psNetCode = hssCode
+            self.numbArea.regionCode = self.dHss[hssCode]
+        else:
+            logging.warn('hsscode error: %s', val)
+            return False
+
+    def parseScp(self, val):
+        if val in self.dScp:
+            segment = self.dScp(val)
+            self.numbArea.scpSegment = segment
+        else:
+            logging.warn('scpcode error: %s', val)
+            return False
+
+    def checkNumber(self):
+        pass
+
+    def checkScp(self):
+        pass
+
+
+class Derictor(object):
+    pass
+
+
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
@@ -1370,12 +1580,8 @@ class Main(object):
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
     def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
-        self.dirBin = dirBin
-        self.appName = appName
-        appNameBody, appNameExt = os.path.splitext(self.appName)
-        self.appNameBody = appNameBody
-        self.appNameExt = appNameExt
+        self.dirBin, self.appName = os.path.split(self.Name)
+        self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
 
         if self.argc < 2:
             self.usage()

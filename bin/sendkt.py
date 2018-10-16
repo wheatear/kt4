@@ -1481,7 +1481,7 @@ class KtPsFFac(object):
 
 class TableFac(KtPsFFac):
     dSql = {}
-    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s order by ps_id'
+    dSql['LOADTMPL'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s order by create_date,ps_id'
     dSql['LOADTMPLBYPS'] = 'select ps_id,region_code,bill_id,sub_bill_id,ps_service_type,action_id,ps_param from %s where ps_id=:PS_ID'
     dCur = {}
     def __init__(self, main):
