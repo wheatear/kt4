@@ -1508,6 +1508,7 @@ class CsvBuilder(object):
             return None
 
     def parseOrdinary(self, val):
+        logging.debug('parsing ordinary number')
         val = val.replace(' ', '')
         aNumb = val.split('-')
         if len(aNumb) != 2:
@@ -1522,6 +1523,7 @@ class CsvBuilder(object):
         self.numbArea.endNumber = int(aNumb[1])
 
     def parseVirtual(self, valStart, valEnd):
+        logging.debug('parsing virtual operator number')
         m = re.match('\d{11}$', valStart)
         if m is None:
             logging.warn('number error: %s', valStart)
@@ -1534,6 +1536,7 @@ class CsvBuilder(object):
         self.numbArea.endNumber = int(valEnd)
 
     def parseHss(self, val):
+        logging.debug('parsing hss')
         hssCode = val.split()[0]
         hssNo = hssCode[-1]
         if hssNo in ('1','2','3','4'):
@@ -1551,6 +1554,7 @@ class CsvBuilder(object):
             return False
 
     def parseScp(self, val):
+        logging.debug('parsing scp')
         if val in self.dScp:
             segment = self.dScp(val)
             self.numbArea.scpSegment = segment
