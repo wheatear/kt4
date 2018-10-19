@@ -571,11 +571,12 @@ class Main(object):
     def usage(self):
         print "Usage: %s numberfile" % self.appName
         print('numberfile : number area file, csv file')
-        print('file format:')
-        print('start_number,end_number,hss,scp')
-        print("example:")
-        print('start_number,end_number,hss,scp')
-        print('16500010000,16500019999,HSS04 FE041,SCP19')
+        print(u'file format 1(普通新号段归属HSS和SCP分配表):'.encode('gbk'))
+        print(u'品牌,号段,IMSI,数量（万）,归属HLR/HSS,VPMN SCP'.encode('gbk'))
+        print(u'动感地带,19800900000-19800999999,4600710090XXXXX-4600710099XXXXX,10,HSS04 FE041,SCP06'.encode('gbk'))
+        print(u'file format 2(转售商新号段归属HSS和SCP分配表):'.encode('gbk'))
+        print(u'归属HLR/HSS,VPMN SCP,手机号段起始,手机号段终止,对应IMSI,数量（万）,号码品牌,公司'.encode('gbk'))
+        print(u'HSS04 FE041,SCP19,16500010000,16500019999,4600730001XXXXX,1,虚拟运营商,北京国美'.encode('gbk'))
         exit(1)
 
     def openFile(self, fileName, mode):
