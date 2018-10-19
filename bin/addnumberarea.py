@@ -66,7 +66,7 @@ class DbConn(object):
         return self.conn
 
     def prepareSql(self, sql):
-        logging.info('prepare sql: %s', sql)
+        logging.debug('prepare sql: %s', sql)
         cur = self.conn.cursor()
         try:
             cur.prepare(sql)
@@ -76,7 +76,7 @@ class DbConn(object):
         return cur
 
     def executemanyCur(self, cur, params):
-        logging.info('execute cur %s : %s', cur.statement, params)
+        logging.debug('execute cur %s : %s', cur.statement, params)
         try:
             cur.executemany(None, params)
         except orcl.DatabaseError, e:
@@ -103,7 +103,7 @@ class DbConn(object):
         return row
 
     def fetchall(self, cur):
-        logging.debug('fethone from %s', cur.statement)
+        logging.debug('feth all from %s', cur.statement)
         try:
             rows = cur.fetchall()
         except orcl.DatabaseError, e:
@@ -112,7 +112,7 @@ class DbConn(object):
         return rows
 
     def executeCur(self, cur, params=None):
-        logging.info('execute cur %s : %s', cur.statement, params)
+        logging.debug('execute cur %s : %s', cur.statement, params)
         try:
             if params is None:
                 cur.execute(None)
@@ -206,28 +206,28 @@ class NumberArea(object):
                     sqlValue = '%s,:%s' % (sqlValue, field)
             sqlInsert = 'insert into %s(%s) values(%s)' % (table, sqlfield, sqlValue)
             self.dSql[table] = sqlInsert
-            logging.info(self.dSql)
+            # logging.info(self.dSql)
 
     def insertNumb(self):
         self.makeInsertSql()
         if not self.insertTable('ps_scp_number_area'):
             main.conn.conn.rollback()
-            logging.info('save %d - %d failure', self.startNumber, self.endNumber)
+            logging.error('save %d - %d failure', self.startNumber, self.endNumber)
             return False
         if not self.insertTable('ps_net_number_area'):
             main.conn.conn.rollback()
-            logging.info('save %d - %d failure', self.startNumber, self.endNumber)
+            logging.err ('save %d - %d failure', self.startNumber, self.endNumber)
             return False
         main.conn.conn.commit()
         logging.info('save %d - %d success', self.startNumber, self.endNumber)
         return True
 
     def insertTable(self, tableName):
-        logging.info('insert table %s', tableName)
+        # logging.info('insert table %s', tableName)
         self.makeParam()
         sql = self.dSql[tableName]
         dParam = self.dTable[tableName]
-        logging.debug(sql)
+        # logging.debug(sql)
         logging.debug(dParam)
         cur = main.conn.prepareSql(sql)
         if not main.conn.executeCur(cur, dParam):
@@ -367,14 +367,14 @@ class CsvBuilder(object):
         logging.info('load number: %s', numbInfo)
         aNumbInfo = numbInfo.split(',')
         if len(aNumbInfo) < 3:
-            logging.warn('no enough infomation in %s', numbInfo)
+            logging.error('no enough infomation in %s', numbInfo)
             # self.writeResult('failure')
             return None
         for field in self.dFieldIndex:
             indx = self.dFieldIndex[field]
             val = aNumbInfo[indx].strip()
             if len(val) < 1:
-                logging.warn('%s error: %s', field, numbInfo)
+                logging.error('%s error: %s', field, numbInfo)
                 # self.writeResult('failure')
                 return None
             aNumbInfo[indx] = val
@@ -384,7 +384,7 @@ class CsvBuilder(object):
             indx = self.dFieldIndex['numberSegment']
             val = aNumbInfo[indx]
             if not self.parseOrdinary(val):
-                logging.warn('ordinary number error: %s', val)
+                logging.error('ordinary number error: %s', val)
                 # self.writeResult('failure')
                 self.numbArea = None
                 return None
@@ -395,7 +395,7 @@ class CsvBuilder(object):
             indxEnd = self.dFieldIndex['endNumber']
             valEnd = aNumbInfo[indxEnd]
             if not self.parseVirtual(valStart, valEnd):
-                logging.warn('virtual operator number error: %s - %s', valStart, valEnd)
+                logging.error('virtual operator number error: %s - %s', valStart, valEnd)
                 # self.writeResult('failure')
                 self.numbArea = None
                 return None
@@ -404,7 +404,7 @@ class CsvBuilder(object):
         indx = self.dFieldIndex['psNetCode']
         val = aNumbInfo[indx]
         if not self.parseHss(val):
-            logging.warn('hss code error: %s', val)
+            logging.error('hss code error: %s', val)
             # self.writeResult('failure')
             self.numbArea = None
             return None
@@ -413,7 +413,7 @@ class CsvBuilder(object):
         indx = self.dFieldIndex['scpSegment']
         val = aNumbInfo[indx]
         if not self.parseScp(val):
-            logging.warn('scp code error: %s', val)
+            logging.error('scp code error: %s', val)
             # self.writeResult('failure')
             self.numbArea = None
             return None
@@ -461,13 +461,13 @@ class CsvBuilder(object):
         elif hssNo in ('5','6','7','8'):
             hssCode = hssCode.replace('0','HW')
         else:
-            logging.warn('hsscode error: %s', val)
+            logging.error('hsscode error: %s', val)
             return False
         if hssCode in self.dHss:
             self.numbArea.psNetCode = hssCode
             self.numbArea.regionCode = self.dHss[hssCode]
         else:
-            logging.warn('hsscode error: %s', val)
+            logging.error('hsscode error: %s', val)
             return False
         return self.numbArea.psNetCode
 
@@ -477,7 +477,7 @@ class CsvBuilder(object):
             segment = self.dScp[val]
             self.numbArea.scpSegment = segment
         else:
-            logging.warn('scpcode error: %s', val)
+            logging.error('scpcode error: %s', val)
             return False
         return self.numbArea.scpSegment
 
@@ -493,13 +493,13 @@ class Director(object):
         self.builder = builder
 
     def start(self):
+        self.builder.loadNumbField()
         self.builder.loadScp()
         self.builder.loadHssRegion()
-        self.builder.loadNumbField()
         while True:
             numberArea = self.builder.loadNumber()
             if not numberArea:
-                logging.warn('load number error')
+                logging.error('load number error')
                 self.builder.writeResult('failure')
                 continue
             elif numberArea == 'end':
