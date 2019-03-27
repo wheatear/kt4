@@ -247,21 +247,22 @@ class KtSyncFac(object):
             shutil.copy(self.inFileFull, fileBack)
             os.rename(self.inFileFull, fileWk)
             self.fileWk = fileWk
-            self.respWk = '%s.hlr' % self.fileWk
+            self.respName = '%s.hlr' % fName
+            self.respWk = os.path.join(main.dirWork, self.respName)
+            self.respOut = os.path.join(main.dirOut, self.respName)
+            self.respBack = os.path.join(main.dirBack, self.respName)
 
         logging.info('process files: %s', self.fileWk)
         return self.fileWk
 
-    def dealFile(self, aFileInfo):
+    def dealFile(self):
         # self.dFiles[fi] = [fileBase,count, cmdTpl, fileWkRsp, fWkRsp, fileOutRsp]
-        fWkRsp = aFileInfo[4]
-        self.resp.close()
-        fileWkRsp = aFileInfo[3]
-        fileOutRsp = aFileInfo[5]
-        fileBkRsp = os.path.join(self.main.dirBack, os.path.basename(fileWkRsp))
-        shutil.copy(fileWkRsp, fileBkRsp)
-        os.rename(fileWkRsp, fileOutRsp)
-        logging.info('%s complete', aFileInfo[0])
+        if not self.resp.closed:
+            self.resp.close()
+        os.remove(self.fileWk)
+        shutil.copy(self.respWk, self.respBack)
+        os.rename(self.respWk, self.respOut)
+        logging.info('%s complete', self.respOut)
 
     def openDs(self):
         if self.orderDs: return self.orderDs
@@ -272,7 +273,12 @@ class KtSyncFac(object):
             exit(2)
 
     def closeDs(self):
-        self.orderDs.close()
+        if not self.orderDs.closed:
+            self.orderDs.close()
+
+    def closeDs(self):
+        if not self.resp.closed:
+            self.resp.close()
 
     def loadOrderHead(self):
         # colHead = self.orderDs.readline()
@@ -366,6 +372,9 @@ class Director(object):
 
     def start(self):
         client = self.factory.makeClient()[0]
+        if not self.factory.findFile():
+            logging.info('no find imsi file,exit.')
+            return
         self.factory.openDs()
         self.factory.loadOrderHead()
         self.fRsp = self.factory.openRsp()
@@ -387,7 +396,8 @@ class Director(object):
             # client.remoteServer.close()
             self.saveOrderRsp(order)
         self.factory.closeDs()
-        self.fRsp.close()
+        self.factory.dealFile()
+        # self.fRsp.close()
 
 
 class Conf(object):
@@ -654,7 +664,8 @@ class Main(object):
         # self.appExt = ext
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
-        self.cfgFile = '%s.cfg' % self.appFull
+        self.cfgFile = None
+        # self.cfgFile = '%s.cfg' % self.Name
         # self.cmdFile = None
         self.caseDs = None
         self.today = time.strftime("%Y%m%d", time.localtime())
@@ -740,5 +751,6 @@ class Main(object):
 if __name__ == '__main__':
     main = Main()
     main.checkArgv()
+    main.parseWorkEnv()
     main.start()
     logging.info('%s complete.', main.baseName)
