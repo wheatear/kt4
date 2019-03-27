@@ -24,5 +24,3 @@ DBINFO = {
 # 'DBPORT': '1521',
 # 'DBSID': 'ktdb',
 # }
-
-

@@ -137,7 +137,9 @@ class DbConn(object):
 
 
 class NumberArea(object):
-    sqlNetNumb = 'insert into ps_net_number_area'
+    # sqlNetNumb = 'insert into ps_net_number_area'
+    sqlBackHss = 'create table ps_net_number_area_%s as select * from ps_net_number_area'
+    sqlBackScp = 'create table ps_scp_number_area%s as select * from ps_scp_number_area'
     def __init__(self):
         self.startNumber = None
         self.endNumber = None
@@ -156,6 +158,7 @@ class NumberArea(object):
         self.describe = None
         self.state = 1
         self.line = None
+        self.loaded = False
         self.dTable = {}
         self.makeParam()
         self.dTable = {'ps_net_number_area': self.dNetNumb,
@@ -269,9 +272,10 @@ class CsvBuilder(object):
         if not os.path.exists(inFile):
             logging.error('no file %s', inFile)
             exit(-1)
-        self.workFile = workFile
+
         shutil.copy(inFile, backFile)
         os.rename(inFile, workFile)
+        self.workFile = workFile
         self.fNumb = main.openFile(workFile, 'r')
         return self.fNumb
 
@@ -302,7 +306,7 @@ class CsvBuilder(object):
             self.failNum += 1
         else:
             logging.error('number result code error: %s', resp)
-        self.fOut.write('%s,%s%s' % (self.numbArea.line, resp, os.linesep))
+        self.fOut.write('%s,%s,%s%s' % (self.numbArea.line,self.numbArea.regionCode, resp, os.linesep))
 
     def loadScp(self):
         logging.info('loading scp config')
@@ -328,8 +332,9 @@ class CsvBuilder(object):
         self.openNumFile()
         self.openOutFile()
         fildName = self.fNumb.readline()
-        self.fOut.write(fildName)
         fildName = fildName.strip()
+        self.fOut.write('%s,region_code,status%s' % (fildName, os.linesep))
+
         if len(fildName) < 1:
             self.loadNumbField()
         logging.info('number segment file fields: %s', fildName)
@@ -360,7 +365,8 @@ class CsvBuilder(object):
         self.numbArea = NumberArea()
         self.numbArea.line = numbInfo.rstrip()
         if not numbInfo:
-            return 'end'
+            self.numbArea.loaded = 'end'
+            return self.numbArea
         numbInfo = numbInfo.strip()
         if len(numbInfo) < 1:
             self.loadNumber()
@@ -369,14 +375,18 @@ class CsvBuilder(object):
         if len(aNumbInfo) < 3:
             logging.error('no enough infomation in %s', numbInfo)
             # self.writeResult('failure')
-            return None
+            return self.numbArea
         for field in self.dFieldIndex:
             indx = self.dFieldIndex[field]
+            if indx >= len(aNumbInfo):
+                logging.error('%s error: %s', field, numbInfo)
+                # self.writeResult('failure')
+                return self.numbArea
             val = aNumbInfo[indx].strip()
             if len(val) < 1:
                 logging.error('%s error: %s', field, numbInfo)
                 # self.writeResult('failure')
-                return None
+                return self.numbArea
             aNumbInfo[indx] = val
 
         if self.type == 'ordinary':
@@ -386,8 +396,7 @@ class CsvBuilder(object):
             if not self.parseOrdinary(val):
                 logging.error('ordinary number error: %s', val)
                 # self.writeResult('failure')
-                self.numbArea = None
-                return None
+                return self.numbArea
         elif self.type == 'virtual':
             logging.info('loading virtual operator number segment')
             indxStart = self.dFieldIndex['startNumber']
@@ -397,8 +406,7 @@ class CsvBuilder(object):
             if not self.parseVirtual(valStart, valEnd):
                 logging.error('virtual operator number error: %s - %s', valStart, valEnd)
                 # self.writeResult('failure')
-                self.numbArea = None
-                return None
+                return self.numbArea
 
         logging.info('loading hss code')
         indx = self.dFieldIndex['psNetCode']
@@ -406,8 +414,8 @@ class CsvBuilder(object):
         if not self.parseHss(val):
             logging.error('hss code error: %s', val)
             # self.writeResult('failure')
-            self.numbArea = None
-            return None
+            # self.numbArea = None
+            return self.numbArea
 
         logging.info('loading scp segment')
         indx = self.dFieldIndex['scpSegment']
@@ -415,10 +423,11 @@ class CsvBuilder(object):
         if not self.parseScp(val):
             logging.error('scp code error: %s', val)
             # self.writeResult('failure')
-            self.numbArea = None
-            return None
+            # self.numbArea = None
+            return self.numbArea
         logging.info('number: %d %d %s %s %s', self.numbArea.startNumber, self.numbArea.endNumber, self.numbArea.psNetCode, self.numbArea.regionCode, self.numbArea.scpSegment)
         # self.writeResult('success')
+        self.numbArea.loaded = True
         return self.numbArea
 
     def parseOrdinary(self, val):
@@ -498,11 +507,11 @@ class Director(object):
         self.builder.loadHssRegion()
         while True:
             numberArea = self.builder.loadNumber()
-            if not numberArea:
+            if not numberArea.loaded:
                 logging.error('load number error')
                 self.builder.writeResult('failure')
                 continue
-            elif numberArea == 'end':
+            elif numberArea.loaded == 'end':
                 logging.info('load number complete.')
                 break
             logging.info('save number')
