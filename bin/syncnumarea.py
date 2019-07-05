@@ -70,119 +70,124 @@ class Conf(object):
     def closeCfg(self):
         if self.fCfg: self.fCfg.close()
 
-    def loadClient(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
-                continue
-            if line == '#provisioning client conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
+    # def loadClient(self):
+    #     # super(self.__class__, self).__init__()
+    #     # for cli in self.aClient:
+    #     #     cfgFile = cli.
+    #     try:
+    #         fCfg = open(self.cfgFile, 'r')
+    #     except IOError, e:
+    #         logging.fatal('can not open configue file %s', self.cfgFile)
+    #         logging.fatal('exit.')
+    #         exit(2)
+    #     clientSection = 0
+    #     client = None
+    #     for line in fCfg:
+    #         line = line.strip()
+    #         if len(line) == 0:
+    #             clientSection = 0
+    #             if client is not None: self.aClient.append(client)
+    #             client = None
+    #             continue
+    #         if line == '#provisioning client conf':
+    #             if clientSection == 1:
+    #                 clientSection = 0
+    #                 if client is not None: self.aClient.append(client)
+    #                 client = None
+    #
+    #             clientSection = 1
+    #             client = Centrex()
+    #             continue
+    #         if clientSection < 1:
+    #             continue
+    #         logging.debug(line)
+    #         param = line.split(' = ', 1)
+    #         if param[0] == 'server':
+    #             client.serverIp = param[1]
+    #         elif param[0] == 'sockPort':
+    #             client.port = param[1]
+    #         elif param[0] == 'GLOBAL_USER':
+    #             client.user = param[1]
+    #         elif param[0] == 'GLOBAL_PASSWD':
+    #             client.passwd = param[1]
+    #         elif param[0] == 'GLOBAL_RTSNAME':
+    #             client.rtsname = param[1]
+    #         elif param[0] == 'GLOBAL_URL':
+    #             client.url = param[1]
+    #     fCfg.close()
+    #     logging.info('load %d clients.', len(self.aClient))
+    #     return self.aClient
 
-                clientSection = 1
-                client = Centrex()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
-
-    def loadEnv(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        envSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line == '#running envirment conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtClient()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'prvnName':
-                client.ktName = param[1]
-            elif param[0] == 'dbusr':
-                client.dbUser = param[1]
-            elif param[0] == 'type':
-                client.ktType = param[1]
-            elif param[0] == 'dbpwd':
-                client.dbPwd = param[1]
-            elif param[0] == 'dbhost':
-                client.dbHost = param[1]
-            elif param[0] == 'dbport':
-                client.dbPort = param[1]
-            elif param[0] == 'dbsid':
-                client.dbSid = param[1]
-            elif param[0] == 'table':
-                client.orderTablePre = param[1]
-            elif param[0] == 'server':
-                client.syncServer = param[1]
-            elif param[0] == 'sockPort':
-                client.sockPort = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
+    # def loadEnv(self):
+    #     # super(self.__class__, self).__init__()
+    #     # for cli in self.aClient:
+    #     #     cfgFile = cli.
+    #     try:
+    #         fCfg = open(self.cfgFile, 'r')
+    #     except IOError, e:
+    #         logging.fatal('can not open configue file %s', self.cfgFile)
+    #         logging.fatal('exit.')
+    #         exit(2)
+    #     envSection = 0
+    #     client = None
+    #     for line in fCfg:
+    #         line = line.strip()
+    #         if len(line) == 0:
+    #             continue
+    #         if line == '#running envirment conf':
+    #             if clientSection == 1:
+    #                 clientSection = 0
+    #                 if client is not None: self.aClient.append(client)
+    #                 client = None
+    #
+    #             clientSection = 1
+    #             client = KtClient()
+    #             continue
+    #         if clientSection < 1:
+    #             continue
+    #         logging.debug(line)
+    #         param = line.split(' = ', 1)
+    #         if param[0] == 'prvnName':
+    #             client.ktName = param[1]
+    #         elif param[0] == 'dbusr':
+    #             client.dbUser = param[1]
+    #         elif param[0] == 'type':
+    #             client.ktType = param[1]
+    #         elif param[0] == 'dbpwd':
+    #             client.dbPwd = param[1]
+    #         elif param[0] == 'dbhost':
+    #             client.dbHost = param[1]
+    #         elif param[0] == 'dbport':
+    #             client.dbPort = param[1]
+    #         elif param[0] == 'dbsid':
+    #             client.dbSid = param[1]
+    #         elif param[0] == 'table':
+    #             client.orderTablePre = param[1]
+    #         elif param[0] == 'server':
+    #             client.syncServer = param[1]
+    #         elif param[0] == 'sockPort':
+    #             client.sockPort = param[1]
+    #     fCfg.close()
+    #     logging.info('load %d clients.', len(self.aClient))
+    #     return self.aClient
 
     def loadDbinfo(self):
         rows = self.openCfg()
         dbSection = 0
         client = None
         dbRows = []
+        dbName = ""
         for i, line in enumerate(rows):
             line = line.strip()
             if len(line) == 0:
                 dbSection = 1
                 continue
-            if line == '#DBCONF':
+            if line.startswith('#DBCONF'):
                 dbSection = 1
+                param = line.split(' = ', 1)
+                if len(param) > 1:
+                    dbName = param[1]
+                    self.dbinfo[dbName] = {}
                 continue
             if dbSection < 1:
                 continue
@@ -190,12 +195,14 @@ class Conf(object):
             dbRows.append(i)
             param = line.split(' = ', 1)
             if len(param) > 1:
-                self.dbinfo[param[0]] = param[1]
+                self.dbinfo[dbName][param[0]] = param[1]
             else:
-                self.dbinfo[param[0]] = None
+                self.dbinfo[dbName][param[0]] = None
         # self.removeUsed(dbRows)
-        self.dbinfo['connstr'] = '%s/%s@%s/%s' % (self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbusr'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
+        self.closeCfg;
+        for db in self.dbinfo:
+            self.dbinfo[db]['connstr'] = '%s/%s@%s/%s' % (self.dbinfo[db]['dbusr'], self.dbinfo[db]['dbpwd'], self.dbinfo[db]['dbhost'], self.dbinfo[db]['dbsid'])
+            logging.info('load dbinfo, %s %s %s', self.dbinfo[db]['dbusr'], self.dbinfo[db]['dbhost'], self.dbinfo[db]['dbsid'])
         return self.dbinfo
 
 
@@ -222,7 +229,7 @@ class DbConn(object):
     def connectServer(self):
         if self.conn: return self.conn
         connstr = '%s/%s@%s/%s' % (
-        self.dbInfo['DBUSR'], self.dbInfo['DBPWD'], self.dbInfo['DBHOST'], self.dbInfo['DBSID'])
+        self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
         try:
             self.conn = orcl.Connection(connstr)
             # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
@@ -230,13 +237,13 @@ class DbConn(object):
             # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
             DbConn.dConn[self.connId] = self.conn
         except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['DBHOST'],
-                          self.cfg.dbinfo['DBUSR'], self.cfg.dbinfo['DBSID'], e)
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'],
+                          self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
             exit()
         return self.conn
 
     def prepareSql(self, sql):
-        logging.debug('prepare sql: %s', sql)
+        logging.info('prepare sql: %s', sql)
         cur = self.conn.cursor()
         try:
             cur.prepare(sql)
@@ -246,7 +253,7 @@ class DbConn(object):
         return cur
 
     def executemanyCur(self, cur, params):
-        logging.debug('execute cur %s : %s', cur.statement, params)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             cur.executemany(None, params)
         except orcl.DatabaseError, e:
@@ -273,7 +280,7 @@ class DbConn(object):
         return row
 
     def fetchall(self, cur):
-        logging.debug('feth all from %s', cur.statement)
+        logging.debug('fethone from %s', cur.statement)
         try:
             rows = cur.fetchall()
         except orcl.DatabaseError, e:
@@ -282,7 +289,7 @@ class DbConn(object):
         return rows
 
     def executeCur(self, cur, params=None):
-        logging.debug('execute cur %s : %s', cur.statement, params)
+        logging.info('execute cur %s : %s', cur.statement, params)
         try:
             if params is None:
                 cur.execute(None)
@@ -431,6 +438,14 @@ class CsvBuilder(object):
         self.dHss = {}
         self.succNum = 0
         self.failNum = 0
+
+    def prepare(self):
+        self.loadNumbField()
+        self.loadScp()
+        self.loadHssRegion()
+
+    def close(self):
+        self.closeOutFile()
 
     def openNumFile(self):
         if self.fNumb:
@@ -667,14 +682,50 @@ class CsvBuilder(object):
         pass
 
 
+class JfBuilder(CsvBuilder):
+    numHeadSql = "select number_head,description from bd.rs_mobile_head where operator_id !=1 and operator_id !=3 and modify_date>=to_date('%s','yyyymmdd') and modify_date<trunc(sysdate)"
+    def __init__(self):
+        self.jfConn = main.conn['jfv8']
+        self.ktConn = main.conn['kt4']
+        self.lastSyncDate = main.lastSyncDate
+        self.numHeadSql = JfBuilder.numHeadSql % self.lastSyncDate
+
+    def prepare(self):
+        pass
+
+    def close(self):
+        pass
+
+    def loadNumber(self):
+        logging.info('loading number from jfdb')
+        cur = self.jfConn.prepareSql(self.numHeadSql)
+        self.jfConn.executeCur(cur)
+        aNumHead = self.jfConn.fetchall(cur)
+        cur.close()
+        for num in aNumHead:
+            numHeader = num[0]
+            desc = num[1]
+            suffixLen = 11 - len(numHeader)
+            startNumber = "%s%s" % (numHeader, "0"*suffixLen)
+            endNumber = "%s%s" % (numHeader, "9" * suffixLen)
+            numbArea = NumberArea()
+            numbArea.startNumber = int(startNumber)
+            numbArea.endNumber = int(endNumber)
+            numbArea.psNetCode = "HSSHW10"
+            numbArea.regionCode = "140"
+            numbArea.scpSegment = "undified"
+            numbArea.loaded = True
+            yield numbArea
+
+        logging.info('scp segment: %s', self.dScp)
+
+
 class Director(object):
     def __init__(self, builder):
         self.builder = builder
 
     def start(self):
-        self.builder.loadNumbField()
-        self.builder.loadScp()
-        self.builder.loadHssRegion()
+        self.builder.prepare()
         while True:
             numberArea = self.builder.loadNumber()
             if not numberArea.loaded:
@@ -689,7 +740,7 @@ class Director(object):
                 self.builder.writeResult('success')
             else:
                 self.builder.writeResult('failure')
-        self.builder.closeOutFile()
+        self.builder.close()
         logging.info('file: %s;  success: %d;  failure: %d', self.builder.numbFile, self.builder.succNum, self.builder.failNum)
         # logging.info('%s completed.', main.appNameBody)
 
@@ -699,14 +750,12 @@ class Main(object):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
         self.conn = None
-        self.writeConn = None
-        self.inFile = None
+        self.lastSyncDate = None
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
     def checkArgv(self):
         self.dirBase = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
         self.appName = os.path.basename(self.Name)
         self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
 
@@ -714,7 +763,13 @@ class Main(object):
             self.usage()
         argvs = sys.argv[1:]
         if len(argvs) > 0:
-            self.inFile = os.path.basename(argvs[0])
+            lastTime = int(argvs[0])
+            if lastTime < 1:
+                self.lastSyncDate = datetime.date.today() + datetime.timedelta(lastTime)
+            elif re.match(r"\d{8}",lastTime):
+                self.lastSyncDate = lastTime
+            else:
+                self.usage()
 
     def parseWorkEnv(self):
         self.dirBin = os.path.join(self.dirBase, 'bin')
@@ -742,14 +797,11 @@ class Main(object):
 
 
     def usage(self):
-        print "Usage: %s numberfile" % self.appName
-        print('numberfile : number area file, csv file')
-        print(u'file format 1(普通新号段归属HSS和SCP分配表):'.encode('gbk'))
-        print(u'品牌,号段,IMSI,数量（万）,归属HLR/HSS,VPMN SCP'.encode('gbk'))
-        print(u'动感地带,19800900000-19800999999,4600710090XXXXX-4600710099XXXXX,10,HSS04 FE041,SCP06'.encode('gbk'))
-        print(u'file format 2(转售商新号段归属HSS和SCP分配表):'.encode('gbk'))
-        print(u'归属HLR/HSS,VPMN SCP,手机号段起始,手机号段终止,对应IMSI,数量（万）,号码品牌,公司'.encode('gbk'))
-        print(u'HSS04 FE041,SCP19,16500010000,16500019999,4600730001XXXXX,1,虚拟运营商,北京国美'.encode('gbk'))
+        print("Usage: %s date" % self.appName)
+        print('date : 日期字符串或天数，表示同步从所给日期或几天之前到昨天的号段数据')
+        print("example:")
+        print("\t%s 20190703 :同步20190703到昨天的号段数据" % (self.appName))
+        print("\t%s 3 :同步之前3天到昨天的号段数据" % (self.appName))
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -762,8 +814,9 @@ class Main(object):
 
     def connectServer(self):
         if self.conn is not None: return self.conn
-        self.conn = DbConn('main', self.appCfg.DBINFO)
-        self.conn.connectServer()
+        for db in self.cfg.dbinfo:
+            self.conn[db] = DbConn(db, self.cfg.dbinfo[db])
+            self.conn[db].connectServer()
         return self.conn
 
     # def getConn(self, connId):
@@ -815,16 +868,19 @@ class Main(object):
 
     def start(self):
         self.checkArgv()
-        cfgName = '%s_cfg' % self.appNameBody
-        self.appCfg = __import__(cfgName)
+        # cfgName = '%s_cfg' % self.appNameBody
+        # self.cfg = __import__(cfgName)
         self.parseWorkEnv()
 
+        self.cfg = Conf(self.cfgFile)
+        self.logLevel = self.cfg.loadLogLevel()
         # self.logLevel = logging.DEBUG
-        logging.basicConfig(filename=self.logFile, level=self.appCfg.LOGLEVEL, format='%(asctime)s %(levelname)s %(message)s',
+        logging.basicConfig(filename=self.logFile, level=self.cfg.LOGLEVEL, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
         logging.info('infile: %s' % self.inFile)
 
+        self.cfg.loadDbinfo()
         self.connectServer()
         # factory = self.makeFactory()
         # print('respfile: %s' % factory.respFullName)
