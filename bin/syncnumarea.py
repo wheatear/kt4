@@ -180,7 +180,7 @@ class Conf(object):
         for i, line in enumerate(rows):
             line = line.strip()
             if len(line) == 0:
-                dbSection = 1
+                # dbSection = 1
                 continue
             if line.startswith('#DBCONF'):
                 dbSection = 1
@@ -202,7 +202,7 @@ class Conf(object):
         self.closeCfg;
         for db in self.dbinfo:
             self.dbinfo[db]['connstr'] = '%s/%s@%s/%s' % (self.dbinfo[db]['dbusr'], self.dbinfo[db]['dbpwd'], self.dbinfo[db]['dbhost'], self.dbinfo[db]['dbsid'])
-            logging.info('load dbinfo, %s %s %s', self.dbinfo[db]['dbusr'], self.dbinfo[db]['dbhost'], self.dbinfo[db]['dbsid'])
+            logging.info('load dbinfo, %s %s %s %s', db, self.dbinfo[db]['dbusr'], self.dbinfo[db]['dbhost'], self.dbinfo[db]['dbsid'])
         return self.dbinfo
 
 
@@ -317,7 +317,8 @@ class NumberArea(object):
     # sqlNetNumb = 'insert into ps_net_number_area'
     sqlBackHss = 'create table ps_net_number_area_%s as select * from ps_net_number_area'
     sqlBackScp = 'create table ps_scp_number_area%s as select * from ps_scp_number_area'
-    def __init__(self):
+    def __init__(self, conn):
+        self.conn = conn
         self.startNumber = None
         self.endNumber = None
         self.psServiceType = 'HLR'
@@ -389,16 +390,16 @@ class NumberArea(object):
             # logging.info(self.dSql)
 
     def insertNumb(self):
-        self.makeInsertSql()
+        # self.makeInsertSql()
         if not self.insertTable('ps_scp_number_area'):
-            main.conn.conn.rollback()
+            self.conn.conn.rollback()
             logging.error('save %d - %d failure', self.startNumber, self.endNumber)
             return False
         if not self.insertTable('ps_net_number_area'):
-            main.conn.conn.rollback()
-            logging.err ('save %d - %d failure', self.startNumber, self.endNumber)
+            self.conn.conn.rollback()
+            logging.error ('save %d - %d failure', self.startNumber, self.endNumber)
             return False
-        main.conn.conn.commit()
+        self.conn.conn.commit()
         logging.info('save %d - %d success', self.startNumber, self.endNumber)
         return True
 
@@ -409,8 +410,8 @@ class NumberArea(object):
         dParam = self.dTable[tableName]
         # logging.debug(sql)
         logging.debug(dParam)
-        cur = main.conn.prepareSql(sql)
-        if not main.conn.executeCur(cur, dParam):
+        cur = self.conn.prepareSql(sql)
+        if not self.conn.executeCur(cur, dParam):
             # cur.connection.commit()
             cur.connection.rollback()
             return False
@@ -683,7 +684,7 @@ class CsvBuilder(object):
 
 
 class JfBuilder(CsvBuilder):
-    numHeadSql = "select number_head,description from bd.rs_mobile_head where operator_id !=1 and operator_id !=3 and modify_date>=to_date('%s','yyyymmdd') and modify_date<trunc(sysdate)"
+    numHeadSql = "select number_head,operator_id from bd.rs_mobile_head where operator_id !=1 and operator_id !=3 and modify_date>=to_date('%s','yyyymmdd') and modify_date<trunc(sysdate)"
     def __init__(self):
         self.jfConn = main.conn['jfv8']
         self.ktConn = main.conn['kt4']
@@ -696,6 +697,9 @@ class JfBuilder(CsvBuilder):
     def close(self):
         pass
 
+    def writeResult(self, resp='success'):
+        pass
+
     def loadNumber(self):
         logging.info('loading number from jfdb')
         cur = self.jfConn.prepareSql(self.numHeadSql)
@@ -704,20 +708,25 @@ class JfBuilder(CsvBuilder):
         cur.close()
         for num in aNumHead:
             numHeader = num[0]
-            desc = num[1]
+            operator = num[1]
             suffixLen = 11 - len(numHeader)
             startNumber = "%s%s" % (numHeader, "0"*suffixLen)
             endNumber = "%s%s" % (numHeader, "9" * suffixLen)
-            numbArea = NumberArea()
+            numbArea = NumberArea(self.ktConn)
             numbArea.startNumber = int(startNumber)
             numbArea.endNumber = int(endNumber)
             numbArea.psNetCode = "HSSHW10"
             numbArea.regionCode = "140"
             numbArea.scpSegment = "undified"
+            if operator== 2:
+                numbArea.scpSegment = "13744106"
+            elif operator == 5:
+                numbArea.scpSegment = "13744105"
             numbArea.loaded = True
+            logging.info('number area: %s %s %s', numHeader, operator, numbArea.scpSegment)
             yield numbArea
 
-        logging.info('scp segment: %s', self.dScp)
+        # logging.info('scp segment: %s', self.dScp)
 
 
 class Director(object):
@@ -726,8 +735,8 @@ class Director(object):
 
     def start(self):
         self.builder.prepare()
-        while True:
-            numberArea = self.builder.loadNumber()
+        for numberArea in self.builder.loadNumber():
+            # numberArea = self.builder.loadNumber()
             if not numberArea.loaded:
                 logging.error('load number error')
                 self.builder.writeResult('failure')
@@ -741,7 +750,7 @@ class Director(object):
             else:
                 self.builder.writeResult('failure')
         self.builder.close()
-        logging.info('file: %s;  success: %d;  failure: %d', self.builder.numbFile, self.builder.succNum, self.builder.failNum)
+        # logging.info('file: %s;  success: %d;  failure: %d', self.builder.numbFile, self.builder.succNum, self.builder.failNum)
         # logging.info('%s completed.', main.appNameBody)
 
 
@@ -749,7 +758,7 @@ class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
         self.argc = len(sys.argv)
-        self.conn = None
+        self.conn = {}
         self.lastSyncDate = None
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
@@ -763,11 +772,12 @@ class Main(object):
             self.usage()
         argvs = sys.argv[1:]
         if len(argvs) > 0:
-            lastTime = int(argvs[0])
-            if lastTime < 1:
-                self.lastSyncDate = datetime.date.today() + datetime.timedelta(lastTime)
-            elif re.match(r"\d{8}",lastTime):
-                self.lastSyncDate = lastTime
+            strLastTime = argvs[0]
+            intLastTime = int(strLastTime)
+            if intLastTime < 1:
+                self.lastSyncDate = datetime.date.today() + datetime.timedelta(intLastTime)
+            elif re.match(r"\d{8}",strLastTime):
+                self.lastSyncDate = strLastTime
             else:
                 self.usage()
 
@@ -786,12 +796,12 @@ class Main(object):
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.appNameBody, self.today)
         logPre = '%s_%s' % (self.appNameBody, self.today)
-        outName = '%s.out' % (self.inFile)
+        # outName = '%s.out' % (self.inFile)
         tplName = '*.tpl'
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         # self.inFile = os.path.join(self.dirIn, self.inFile)
-        self.outFile = os.path.join(self.dirOut, outName)
+        # self.outFile = os.path.join(self.dirOut, outName)
         # self.tplFile = os.path.join(self.dirTpl, self.cmdTpl)
         # self.logPre = os.path.join(self.dirLog, logPre)
 
@@ -813,8 +823,10 @@ class Main(object):
         return f
 
     def connectServer(self):
-        if self.conn is not None: return self.conn
+        if len(self.conn) > 0: return self.conn
         for db in self.cfg.dbinfo:
+            logging.info("connect db: %s %s", db, self.cfg.dbinfo[db])
+            # print("connect db: %s %s" % (db, self.cfg.dbinfo[db]))
             self.conn[db] = DbConn(db, self.cfg.dbinfo[db])
             self.conn[db].connectServer()
         return self.conn
@@ -875,17 +887,18 @@ class Main(object):
         self.cfg = Conf(self.cfgFile)
         self.logLevel = self.cfg.loadLogLevel()
         # self.logLevel = logging.DEBUG
-        logging.basicConfig(filename=self.logFile, level=self.cfg.LOGLEVEL, format='%(asctime)s %(levelname)s %(message)s',
+        logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
-        logging.info('infile: %s' % self.inFile)
+        # logging.info('infile: %s' % self.inFile)
 
         self.cfg.loadDbinfo()
         self.connectServer()
+        # print("connected db server")
         # factory = self.makeFactory()
         # print('respfile: %s' % factory.respFullName)
         # builder = Builder(self)
-        builder = CsvBuilder(self.inFile)
+        builder = JfBuilder()
         director = Director(builder)
         director.start()
 
