@@ -276,7 +276,7 @@ class KtSyncFac(object):
         if not self.orderDs.closed:
             self.orderDs.close()
 
-    def closeDs(self):
+    def closeRsp(self):
         if not self.resp.closed:
             self.resp.close()
 
@@ -396,6 +396,7 @@ class Director(object):
             # client.remoteServer.close()
             self.saveOrderRsp(order)
         self.factory.closeDs()
+        self.factory.closeRsp()
         self.factory.dealFile()
         # self.fRsp.close()
 

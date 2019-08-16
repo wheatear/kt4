@@ -24,117 +24,7 @@ import signal
 import logging
 from socket import *
 import cx_Oracle as orcl
-
-class Conf(object):
-    def __init__(self, main, cfgfile):
-        self.main = main
-        self.cfgFile = cfgfile
-        self.logLevel = None
-        # self.fCfg = None
-        self.dNet = {}
-        self.rows = []
-        self.dbinfo = {}
-
-    def loadLogLevel(self):
-        rows = self.openCfg()
-        loglevelRow = []
-        for i, line in enumerate(rows):
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            if line[:8] == 'LOGLEVEL':
-                param = line.split(' = ', 1)
-                logLevel = 'logging.%s' % param[1]
-                self.logLevel = eval(logLevel)
-                loglevelRow.append(i)
-                break
-        self.removeUsed(loglevelRow)
-        return self.logLevel
-
-    def removeUsed(self, lines):
-        for line in lines:
-            self.rows.pop(line)
-
-    def openCfg(self):
-        if len(self.rows) > 0 : return self.rows
-        fCfg = self.main.openFile(self.cfgFile, 'r')
-        self.rows = fCfg.readlines()
-        fCfg.close()
-        return self.rows
-
-    # def closeCfg(self):
-    #     if self.fCfg: self.fCfg.close()
-
-    def loadNet(self):
-        rows = self.openCfg()
-        netSection = 0
-        net = None
-        netRows = []
-        for i, line in enumerate(rows):
-            line = line.strip()
-            if len(line) == 0:
-                if net is not None:
-                    netType = net['NETTYPE']
-                    if netType not in self.dNet:
-                        self.dNet[netType] = [net]
-                    else:
-                        self.dNet[netType].append(net)
-                net = None
-                netSection = 0
-                continue
-            if line[:8] == '#NETTYPE':
-                if net is not None:
-                    netType = net['NETTYPE']
-                    if netType not in self.dNet:
-                        self.dNet[netType] = [net]
-                    else:
-                        self.dNet[netType].append(net)
-                net = None
-
-                netSection = 1
-                net = {}
-                line = line[1:]
-            if netSection < 1:
-                continue
-            logging.debug(line)
-            netRows.append(i)
-            param = line.split(' = ', 1)
-            if len(param) > 1:
-                net[param[0]] = param[1]
-            else:
-                net[param[0]] = None
-        # self.removeUsed(netRows)
-        logging.info('load %d net.', len(self.dNet))
-        return self.dNet
-
-    def loadDbinfo(self):
-        rows = self.openCfg()
-        dbSection = 0
-        client = None
-        dbRows = []
-        for i, line in enumerate(rows):
-            line = line.strip()
-            if len(line) == 0:
-                dbSection = 1
-                continue
-            if line == '#DBCONF':
-                dbSection = 1
-                continue
-            if dbSection < 1:
-                continue
-            logging.debug(line)
-            dbRows.append(i)
-            param = line.split(' = ', 1)
-            if len(param) > 1:
-                self.dbinfo[param[0]] = param[1]
-            else:
-                self.dbinfo[param[0]] = None
-        # self.removeUsed(dbRows)
-        self.dbinfo['connstr'] = '%s/%s@%s/%s' % (self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbusr'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        return self.dbinfo
+import ConfigParser
 
 
 class TcpClt(object):
@@ -404,6 +294,7 @@ class DbConn(object):
         if self.conn: return self.conn
         # if self.remoteServer: return self.remoteServer
         connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
+        print("connstr: %s" % connstr)
         try:
             self.conn = orcl.Connection(connstr)
             # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
@@ -680,10 +571,10 @@ class FileFac(object):
 
     def makeNet(self):
         cfg = self.main.cfg
-        if self.netType not in cfg.dNet:
+        if self.netType not in self.main.dNetTypes:
             logging.fatal('no find net type %s', self.netType)
             exit(2)
-        self.aNetInfo = cfg.dNet[self.netType]
+        self.aNetInfo = self.main.dNetTypes[self.netType]
         netClassName = '%sClient' % self.netType
         logging.info('load %d net info.', len(self.aNetInfo))
         for netInfo in self.aNetInfo:
@@ -693,7 +584,7 @@ class FileFac(object):
             net.prepareTmpl()
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
-            netCode = netInfo['NetCode']
+            netCode = netInfo['netcode']
             self.dNetClient[netCode] = net
         return self.dNetClient
 
@@ -868,12 +759,9 @@ class Main(object):
         self.psId = None
 
     def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
-        self.dirBin = dirBin
-        self.appName = appName
-        appNameBody, appNameExt = os.path.splitext(self.appName)
-        self.appNameBody = appNameBody
-        self.appNameExt = appNameExt
+        self.dirBase = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.appName = os.path.basename(self.Name)
+        self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
 
         if self.argc < 3:
             self.usage()
@@ -902,23 +790,14 @@ class Main(object):
         # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
     def parseWorkEnv(self):
-        if self.dirBin=='' or self.dirBin=='.':
-            self.dirBin = '.'
-            self.dirApp = '..'
-        else:
-            dirApp, dirBinName = os.path.split(self.dirBin)
-            if dirApp=='':
-                self.dirApp = '.'
-            else:
-                self.dirApp = dirApp
-
         # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
-        self.dirLog = os.path.join(self.dirApp, 'log')
-        self.dirCfg = os.path.join(self.dirApp, 'config')
-        self.dirTpl = os.path.join(self.dirApp, 'template')
-        self.dirLib = os.path.join(self.dirApp, 'lib')
-        self.dirInput = os.path.join(self.dirApp, 'input')
-        self.dirOutput = os.path.join(self.dirApp, 'output')
+        self.dirBin = os.path.join(self.dirBase, 'bin')
+        self.dirLog = os.path.join(self.dirBase, 'log')
+        self.dirCfg = os.path.join(self.dirBase, 'config')
+        self.dirTpl = os.path.join(self.dirBase, 'template')
+        self.dirLib = os.path.join(self.dirBase, 'lib')
+        self.dirInput = os.path.join(self.dirBase, 'input')
+        self.dirOutput = os.path.join(self.dirBase, 'output')
 
         # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
         self.today = time.strftime("%Y%m%d", time.localtime())
@@ -931,6 +810,44 @@ class Main(object):
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
         # logging.info('outfile: %s', self.outFile)
+
+    def readCfg(self):
+        self.cfg = ConfigParser.ConfigParser()
+        self.cfg.read(self.cfgFile)
+        self.dDbInfo = {}
+        self.dNetTypes = {}
+
+        logging.info("load db confige")
+        if 'db' not in self.cfg.sections():
+            logging.fatal('there is no db info in confige file')
+            exit(-1)
+        for inf in self.cfg.items('db'):
+            self.dDbInfo[inf[0]] = inf[1]
+        # print(self.dDbInfo)
+
+        logging.info("load nettype and netinfo")
+        for sec in self.cfg.sections():
+            # print(sec)
+            # print(self.cfg.options(sec))
+            if "nettype" in self.cfg.options(sec):
+                nt = self.cfg.get(sec,"nettype")
+                netInfo = {}
+                for ntin in self.cfg.items(sec):
+                    netInfo[ntin[0]] = ntin[1]
+                if nt in self.dNetTypes:
+                    self.dNetTypes[nt].append(netInfo)
+                else:
+                    self.dNetTypes[nt] = [netInfo]
+
+        # for nt in self.dNetTypes:
+        #     print("net type: %s\r\n" % nt)
+        #     for ntInfo in self.dNetTypes[nt]:
+        #         print("\r\nNetCode: %s\r\n" % ntInfo["netcode"])
+        #         for pa in ntInfo:
+        #             print("%s : %s \r\n" % (pa, ntInfo[pa]))
+        # print("all net \r\n")
+        # print(self.dNetTypes)
+
 
     def usage(self):
         print "Usage: %s [-t] cmdfile [-p psid] datafile" % self.appName
@@ -947,7 +864,12 @@ class Main(object):
 
     def connectServer(self):
         if self.conn is not None: return self.conn
-        self.conn = DbConn(self.cfg.dbinfo)
+        # self.dbinfo['connstr'] = '%s/%s@%s/%s' % (
+        # self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
+        # if "db" not in self.cfg.sections():
+        #     logging.error("no db configer")
+        #     exit(-1)
+        self.conn = DbConn(self.dDbInfo)
         self.conn.connectServer()
         return self.conn
 
@@ -1009,6 +931,9 @@ class Main(object):
         if self.netType is None:
             logging.fatal('no find net type,exit.')
             exit(3)
+        if self.netType not in self.dNetTypes:
+            logging.fatal("there is no nettype: %s in confige file", self.netType)
+            exit(3)
         # facName = '%sFac' % self.netType
         # fac_meta = getattr(self.appNameBody, facName)
         # fac = fac_meta(self)
@@ -1027,17 +952,18 @@ class Main(object):
     def start(self):
         self.checkArgv()
         self.parseWorkEnv()
+        self.readCfg()
 
-        self.cfg = Conf(main, self.cfgFile)
-        self.logLevel = self.cfg.loadLogLevel()
+        self.logLevel = self.cfg.get("main", "loglevel")
+        # print(self.logLevel)
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
         print('logfile: %s' % self.logFile)
 
-        self.cfg.loadDbinfo()
+        # self.cfg.loadDbinfo()
         self.connectServer()
-        self.cfg.loadNet()
+        # self.cfg.loadNet()
         factory = self.makeFactory()
         print('respfile: %s' % factory.respFullName)
         director = Director(factory)
