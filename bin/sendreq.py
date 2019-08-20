@@ -15,6 +15,7 @@
 
 import sys
 import os
+import string
 import copy
 import time
 import datetime
@@ -129,6 +130,9 @@ class HttpShortClient(object):
         self.httpHead = None
         self.httpBody = None
         self.remoteServer = None
+        # for k in self.dNetInfo:
+        #     uk = string.upper(k)
+        #     self.dNetInfo[uk] = self.dNetInfo[k]
 
     # def makeCmdTempate(self):
     #     for tmpl in self.aCmdTemplates:
@@ -162,7 +166,7 @@ class HttpShortClient(object):
         # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
         httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
-        httpHead = '%s%s' % (httpHead, 'Host: ^<Ip^>:^<Port^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<IP^>:^<PORT^>\r\n')
         httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
         httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
         self.httpHead = httpHead
@@ -199,7 +203,7 @@ class HttpShortClient(object):
     def connectServer(self):
         if self.remoteServer: self.remoteServer.close()
         # if self.remoteServer: return self.remoteServer
-        self.remoteServer = TcpClt(self.dNetInfo['Ip'], int(self.dNetInfo['Port']))
+        self.remoteServer = TcpClt(self.dNetInfo['IP'], int(self.dNetInfo['PORT']))
         return self.remoteServer
 
     def recvResp(self, order):
@@ -294,7 +298,7 @@ class DbConn(object):
         if self.conn: return self.conn
         # if self.remoteServer: return self.remoteServer
         connstr = '%s/%s@%s/%s' % (self.dbInfo['dbusr'], self.dbInfo['dbpwd'], self.dbInfo['dbhost'], self.dbInfo['dbsid'])
-        print("connstr: %s" % connstr)
+        # print("connstr: %s" % connstr)
         try:
             self.conn = orcl.Connection(connstr)
             # dsn = orcl.makedsn(self.dbHost, self.dbPort, self.dbSid)
@@ -584,7 +588,7 @@ class FileFac(object):
             net.prepareTmpl()
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
-            netCode = netInfo['netcode']
+            netCode = netInfo['NETCODE']
             self.dNetClient[netCode] = net
         return self.dNetClient
 
@@ -778,19 +782,16 @@ class Main(object):
             # print 'opt: %s' % opt
             if opt == '-t':
                 self.facType = 't'
-                self.cmdFile = arg
+                self.cmdFileName = arg
             elif opt == '-p':
                 self.psId = arg
         if self.facType == 'f':
-            self.cmdFile = arvs[0]
-            self.dsIn = arvs[1]
+            self.cmdFileName = arvs[0]
+            self.inFileName = arvs[1]
         else:
             self.dsIn = arvs[0]
-        # self.logFile = '%s%s' % (self.dsIn, '.log')
-        # self.resultOut = '%s%s' % (self.dsIn, '.rsp')
 
     def parseWorkEnv(self):
-        # print('dirApp: %s  dirBin: %s' % (self.dirApp, dirBin))
         self.dirBin = os.path.join(self.dirBase, 'bin')
         self.dirLog = os.path.join(self.dirBase, 'log')
         self.dirCfg = os.path.join(self.dirBase, 'config')
@@ -798,18 +799,20 @@ class Main(object):
         self.dirLib = os.path.join(self.dirBase, 'lib')
         self.dirInput = os.path.join(self.dirBase, 'input')
         self.dirOutput = os.path.join(self.dirBase, 'output')
+        self.dirWork = os.path.join(self.dirBase, 'work')
 
         # self.today = time.strftime("%Y%m%d%H%M%S", time.localtime())
         self.today = time.strftime("%Y%m%d", time.localtime())
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.appNameBody, self.today)
         logNamePre = '%s_%s' % (self.appNameBody, self.today)
-        outFileName = '%s_%s' % (os.path.basename(self.dsIn), self.today)
+        outFileName = '%s_%s' % (os.path.basename(self.inFileName), self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.logPre = os.path.join(self.dirLog, logNamePre)
         self.outFile = os.path.join(self.dirOutput, outFileName)
-        # logging.info('outfile: %s', self.outFile)
+        self.cmdFile = os.path.join(self.dirTpl, self.cmdFileName)
+        self.dsIn = os.path.join(self.dirInput, self.inFileName)
 
     def readCfg(self):
         self.cfg = ConfigParser.ConfigParser()
@@ -817,15 +820,14 @@ class Main(object):
         self.dDbInfo = {}
         self.dNetTypes = {}
 
-        logging.info("load db confige")
         if 'db' not in self.cfg.sections():
-            logging.fatal('there is no db info in confige file')
+            # logging.fatal('there is no db info in confige file')
             exit(-1)
         for inf in self.cfg.items('db'):
             self.dDbInfo[inf[0]] = inf[1]
         # print(self.dDbInfo)
 
-        logging.info("load nettype and netinfo")
+        # logging.info("load nettype and netinfo")
         for sec in self.cfg.sections():
             # print(sec)
             # print(self.cfg.options(sec))
@@ -833,25 +835,15 @@ class Main(object):
                 nt = self.cfg.get(sec,"nettype")
                 netInfo = {}
                 for ntin in self.cfg.items(sec):
-                    netInfo[ntin[0]] = ntin[1]
+                    netInfo[string.upper(ntin[0])] = ntin[1]
                 if nt in self.dNetTypes:
                     self.dNetTypes[nt].append(netInfo)
                 else:
                     self.dNetTypes[nt] = [netInfo]
 
-        # for nt in self.dNetTypes:
-        #     print("net type: %s\r\n" % nt)
-        #     for ntInfo in self.dNetTypes[nt]:
-        #         print("\r\nNetCode: %s\r\n" % ntInfo["netcode"])
-        #         for pa in ntInfo:
-        #             print("%s : %s \r\n" % (pa, ntInfo[pa]))
-        # print("all net \r\n")
-        # print(self.dNetTypes)
-
-
     def usage(self):
-        print "Usage: %s [-t] cmdfile [-p psid] datafile" % self.appName
-        print "example:   %s %s" % (self.appName,'creatUser -p 2577133267 teldata')
+        print("Usage: %s [-t] cmdfile [-p psid] datafile" % self.appName)
+        print("example:   %s %s" % (self.appName,'creatUser -p 2577133267 teldata'))
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -954,11 +946,11 @@ class Main(object):
         self.parseWorkEnv()
         self.readCfg()
 
-        self.logLevel = self.cfg.get("main", "loglevel")
-        # print(self.logLevel)
-        logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
-                            datefmt='%Y%m%d%H%M%S')
-        logging.info('%s starting...' % self.appName)
+        # self.logLevel = eval(logLevel)
+        self.logLevel = eval('logging.%s' % self.cfg.get("main", "loglevel"))
+        print('loglevel: %s, logfile: %s' %(self.logLevel, self.logFile))
+        logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d%H%M%S')
+        logging.info('%s starting...', self.appName)
         print('logfile: %s' % self.logFile)
 
         # self.cfg.loadDbinfo()
