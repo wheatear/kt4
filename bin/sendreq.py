@@ -230,6 +230,55 @@ class HttpShortClient(object):
         return True
 
 
+class HSSHWClient(HttpShortClient):
+    def __init__(self, netInfo):
+        super(self.__class__, self).__init__(netInfo)
+        self.isLogin = False
+
+    def connectServer(self):
+        super(self.__class__, self).connectServer()
+
+        if self.remoteServer: self.remoteServer.close()
+        # if self.remoteServer: return self.remoteServer
+        self.remoteServer = TcpClt(self.dNetInfo['IP'], int(self.dNetInfo['PORT']))
+        return self.remoteServer
+
+    def makeHttpHead(self):
+        httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
+        # httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<IP^>:^<PORT^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
+        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
+        self.httpHead = httpHead
+        self.httpheadReplaceNetInfo()
+
+    def makeLgiHttpHead(self):
+        httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
+        # httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
+        # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
+        httpHead = '%s%s' % (httpHead, 'Host: ^<IP^>:^<PORT^>\r\n')
+        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
+        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
+        self.httpHead = httpHead
+        self.httpheadReplaceNetInfo()
+
+    def login(self):
+        self.connectServer()
+
+
+    def prepareTmpl(self):
+        self.tmplReplaceNetInfo()
+        self.makeHttpHead()
+        self.login()
+
+
 class ReqOrder(object):
     def __init__(self):
         self.no = None
@@ -571,6 +620,7 @@ class FileFac(object):
             self.aCmdTemplates.append(tmpl)
 
         logging.info('load %d cmd templates.' % len(self.aCmdTemplates))
+        logging.debug(self.aCmdTemplates)
         self.main.fCmd.close()
 
     def makeNet(self):
@@ -581,14 +631,19 @@ class FileFac(object):
         self.aNetInfo = self.main.dNetTypes[self.netType]
         netClassName = '%sClient' % self.netType
         logging.info('load %d net info.', len(self.aNetInfo))
+        logging.info(self.aNetInfo)
         for netInfo in self.aNetInfo:
             # print netInfo
+            netCode = netInfo['NETCODE']
+            if self.netCode != netCode:
+                continue
+            logging.debug(netInfo)
             net = createInstance(self.main.appNameBody, netClassName, netInfo)
             net.aCmdTemplates = self.aCmdTemplates
             net.prepareTmpl()
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
-            netCode = netInfo['NETCODE']
+
             self.dNetClient[netCode] = net
         return self.dNetClient
 

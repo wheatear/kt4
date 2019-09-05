@@ -5,6 +5,7 @@
 import sys
 import os
 import time
+import string
 import datetime
 import getopt
 # import random
@@ -15,18 +16,9 @@ import signal
 import logging
 # import cx_Oracle as orcl
 from socket import *
+import ConfigParser
 
 ls = os.linesep
-
-class HssUser(object):
-    def __init__(self, msisdn, imsi, client):
-        self.msisdn = msisdn
-        self.imsi = imsi
-        self.client = client
-        self.isHssUser = 0
-
-    def qryHss(self):
-        pass
 
 
 class CmdTemplate(object):
@@ -41,13 +33,13 @@ class CmdTemplate(object):
 
 
 class KtSyncClt(object):
-    def __init__(self, cfg, cmdfile):
-        self.cfg = cfg
+    def __init__(self, netInfo, cmdfile):
+        self.dNetInfo = netInfo
         self.cmdFile = cmdfile
         self.httpHead = None
         self.httpRequest = None
-        self.serverIp = None
-        self.port = None
+        # self.serverIp = None
+        # self.port = None
         self.url = None
         self.user = None
         self.passwd = None
@@ -62,35 +54,6 @@ class KtSyncClt(object):
         tmplMsg = 'TRADE_ID=1111111;ACTION_ID=5;DISP_GPRS=4;PS_SERVICE_TYPE=HLR;MSISDN=^<BILL_ID^>;IMSI=^<IMSI^>;'
         tmpl = CmdTemplate(tmplMsg)
         self.aCmdTemplates.append(tmpl)
-
-    def loadClient(self):
-        fCfg = self.cfg.openCfg()
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line == '#kt sync server conf':
-                clientSection = 1
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                self.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                self.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                self.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                self.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                self.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                self.url = param[1]
-        fCfg.close()
 
     def makeCmdTempate(self):
         pass
@@ -109,8 +72,8 @@ class KtSyncClt(object):
         httpHead = '%s%s' % (httpHead, 'Host: ^<server^>:^<sockPort^>\r\n')
         httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
         httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
-        httpHead = httpHead.replace('^<server^>', self.serverIp)
-        httpHead = httpHead.replace('^<sockPort^>', self.port)
+        httpHead = httpHead.replace('^<server^>', self.dNetInfo['SERVER'])
+        httpHead = httpHead.replace('^<sockPort^>', self.dNetInfo['SOCKPORT'])
         self.httpHead = httpHead
 
     def makeMsgHead(self):
@@ -146,7 +109,7 @@ class KtSyncClt(object):
     def connectServer(self):
         # if self.remoteServer: self.remoteServer.close()
         if self.remoteServer: return self.remoteServer
-        self.remoteServer = TcpClt(self.serverIp, int(self.port))
+        self.remoteServer = TcpClt(self.dNetInfo['SERVER'], int(self.dNetInfo['SOCKPORT']))
         # self.remoteServer.connect()
         return self.remoteServer
 
@@ -208,28 +171,16 @@ class ReqOrder(object):
         return status
 
 
-# class TelOrder(ReqOrder):
-#     def __init__(self):
-#         super(self.__class__, self).__init__()
-#         # self.no = None
-#         # self.dParam = {}
-#         # self.aReqMsg = []
-#         # self.aResp = []
-#         self.dParam['BILL_ID'] = None
-#         self.dParam['USERLOCKFLG'] = 0
-#         self.dParam['USER_PORTALACCOUNT_ENABLEACCOUNT'] = None
-#         self.dParam['POSTCODE'] = '10'
-#         self.dParam['ServiceType'] = 0
-
-
 class KtSyncFac(object):
-    def __init__(self, cfg, inFile):
-        self.cfg = cfg
+    def __init__(self, dNetTypes, inFile):
+        self.dNetTypes = dNetTypes
+        self.facName = 'KtSync'
         self.cmdFile = None
         self.inFile = inFile
         self.inFileFull = None
         self.orderDs = None
-        self.aClient = []
+        # self.aClient = []
+        self.dClient = {}
         # self.respName = '%s.hlr' % self.inFile
         self.resp = None
         self.fileWk = None
@@ -308,54 +259,21 @@ class KtSyncFac(object):
             order.setPara(aParams)
             order.line = line
             logging.debug('load order %s', line)
-            return order
-        return None
+            yield order
         # self.closeDs()
 
     def makeClient(self):
-        fCfg = self.cfg.openCfg()
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
-                continue
-            if line == '#kt sync server conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtSyncClt(self.cfg, self.cmdFile)
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        for clt in self.aClient:
-            # centrex.connectServer()
+        dNets = self.dNetTypes[self.facName]
+        for nt in dNets:
+            clt = KtSyncClt(dNets[nt], self.cmdFile)
+            self.dClient[nt] = clt
+        logging.info('load %d clients.', len(self.dClient))
+        for nt in self.dClient:
+            clt = self.dClient[nt]
             clt.loadCmd()
             clt.makeCmdTempate()
             clt.makeMsgHead()
-        return self.aClient
+        return self.dClient
 
     def start(self):
         pass
@@ -366,29 +284,31 @@ class Director(object):
         self.factory = factory
         self.shutDown = None
         self.fRsp = None
+        self.netCode = 'kt4'
 
     def saveOrderRsp(self, order):
         self.fRsp.write('%s %s\r\n' % (order.line, order.aResp[0]))
 
     def start(self):
-        client = self.factory.makeClient()[0]
+        client = self.factory.makeClient()[self.netCode]
         if not self.factory.findFile():
             logging.info('no find imsi file,exit.')
             return
         self.factory.openDs()
         self.factory.loadOrderHead()
         self.fRsp = self.factory.openRsp()
-        # client.loadClient()
-        # client.loadCmd()
         client.connectServer()
         i = 0
-        while not self.shutDown:
-            logging.debug('timeer %f load order', time.time())
-            order = self.factory.loadOrder()
+        # while not self.shutDown:
+        for order in self.factory.loadOrder():
+            if self.shutDown: break
+
+            # order = self.factory.loadOrder()
             if order is None:
                 logging.info('load all orders,')
                 break
             i += 1
+            logging.debug('load order %d', i)
             client.connectServer()
             client.sendOrder(order)
             # client.recvResp(order)
@@ -399,148 +319,6 @@ class Director(object):
         self.factory.closeRsp()
         self.factory.dealFile()
         # self.fRsp.close()
-
-
-class Conf(object):
-    def __init__(self, cfgfile):
-        self.cfgFile = cfgfile
-        self.logLevel = None
-        self.aClient = []
-        self.fCfg = None
-
-    def loadLogLevel(self):
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            print('Can not open configuration file %s: %s' % (self.cfgFile, e))
-            exit(2)
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            if line[:8] == 'LOGLEVEL':
-                param = line.split(' = ', 1)
-                logLevel = 'logging.%s' % param[1]
-                self.logLevel = eval(logLevel)
-                break
-        fCfg.close()
-        return self.logLevel
-
-    def openCfg(self):
-        if self.fCfg: return self.fCfg
-        try:
-            self.fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        return self.fCfg
-
-    def closeCfg(self):
-        if self.fCfg: self.fCfg.close()
-
-    def loadClient(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
-                continue
-            if line == '#provisioning client conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = Centrex()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
-
-    def loadEnv(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        envSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line == '#running envirment conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtClient()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'prvnName':
-                client.ktName = param[1]
-            elif param[0] == 'dbusr':
-                client.dbUser = param[1]
-            elif param[0] == 'type':
-                client.ktType = param[1]
-            elif param[0] == 'dbpwd':
-                client.dbPwd = param[1]
-            elif param[0] == 'dbhost':
-                client.dbHost = param[1]
-            elif param[0] == 'dbport':
-                client.dbPort = param[1]
-            elif param[0] == 'dbsid':
-                client.dbSid = param[1]
-            elif param[0] == 'table':
-                client.orderTablePre = param[1]
-            elif param[0] == 'server':
-                client.syncServer = param[1]
-            elif param[0] == 'sockPort':
-                client.sockPort = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
 
 
 class TcpClt(object):
@@ -659,57 +437,34 @@ class KtClient(object):
 class Main(object):
     def __init__(self):
         self.Name = sys.argv[0]
-
-        # appFull,ext = os.path.splitext(self.Name)
-        # self.appFull = appFull
-        # self.appExt = ext
-        self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.cfgFile = None
-        # self.cfgFile = '%s.cfg' % self.Name
-        # self.cmdFile = None
         self.caseDs = None
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
     def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
-        self.dirBin = dirBin
-        self.appName = appName
-        appNameBody, appNameExt = os.path.splitext(self.appName)
-        self.appNameBody = appNameBody
-        self.appNameExt = appNameExt
+        self.dirBase = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.appName = os.path.basename(self.Name)
+        self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
 
-        # if self.argc < 2:
-            # self.usage()
         if self.argc < 2:
             # self.usage()
             self.caseDs = 'wsdx_cycle_%s.cy4' % self.today
         else:
             self.caseDs = sys.argv[1]
 
-        # self.logFile = '%s%s' % (self.caseDs, '.log')
-        # self.resultOut = '%s%s' % (self.caseDs, '.rsp')
-
     def parseWorkEnv(self):
-        if self.dirBin=='' or self.dirBin=='.':
-            self.dirBin = '.'
-            self.dirApp = '..'
-        else:
-            dirApp, dirBinName = os.path.split(self.dirBin)
-            if dirApp=='':
-                self.dirApp = '.'
-            else:
-                self.dirApp = dirApp
-        self.dirLog = os.path.join(self.dirApp, 'log')
-        # self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirBin = os.path.join(self.dirBase, 'bin')
+        self.dirLog = os.path.join(self.dirBase, 'log')
+        # self.dirCfg = os.path.join(self.dirBase, 'config')
         self.dirCfg = self.dirBin
-        self.dirBack = os.path.join(self.dirApp, 'back')
-        self.dirIn = os.path.join(self.dirApp, 'input')
-        # self.dirLib = os.path.join(self.dirApp, 'lib')
-        self.dirOut = os.path.join(self.dirApp, 'output')
-        self.dirWork = os.path.join(self.dirApp, 'work')
-        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirBack = os.path.join(self.dirBase, 'back')
+        self.dirIn = os.path.join(self.dirBase, 'input')
+        # self.dirLib = os.path.join(self.dirBase, 'lib')
+        self.dirOut = os.path.join(self.dirBase, 'output')
+        self.dirWork = os.path.join(self.dirBase, 'work')
+        self.dirTpl = os.path.join(self.dirBase, 'template')
 
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.caseDs, self.today)
@@ -722,6 +477,35 @@ class Main(object):
         # self.logPre = os.path.join(self.dirLog, logPre)
         self.workFile = os.path.join(self.dirWork, outName)
         self.outFile = os.path.join(self.dirOut, outName)
+
+    def readCfg(self):
+        self.cfg = ConfigParser.ConfigParser()
+        self.cfg.read(self.cfgFile)
+        self.dDbInfo = {}
+        self.dNetTypes = {}
+
+        # if 'db' not in self.cfg.sections():
+        #     # logging.fatal('there is no db info in confige file')
+        #     exit(-1)
+        # for inf in self.cfg.items('db'):
+        #     self.dDbInfo[inf[0]] = inf[1]
+        # # print(self.dDbInfo)
+
+        for sec in self.cfg.sections():
+            if "nettype" in self.cfg.options(sec):
+                nt = self.cfg.get(sec,"nettype")
+                netInfo = {}
+                for ntin in self.cfg.items(sec):
+                    netInfo[string.upper(ntin[0])] = ntin[1]
+                if nt in self.dNetTypes:
+                    self.dNetTypes[nt][sec] = netInfo
+                else:
+                    self.dNetTypes[nt] = {}
+                    self.dNetTypes[nt][sec] = netInfo
+                # if nt in self.dNetTypes:
+                #     self.dNetTypes[nt].append(netInfo)
+                # else:
+                #     self.dNetTypes[nt] = [netInfo]
 
     def buildCentrexClient(self):
         logging.info('build centrex client.')
@@ -736,14 +520,16 @@ class Main(object):
         exit(1)
 
     def start(self):
-        self.cfg = Conf(self.cfgFile)
-        self.logLevel = self.cfg.loadLogLevel()
+        self.checkArgv()
+        self.parseWorkEnv()
+        self.readCfg()
 
+        self.logLevel = eval('logging.%s' % self.cfg.get("main", "loglevel"))
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
-                            datefmt='%Y%m%d%I%M%S')
-        logging.info('%s starting...' % self.baseName)
+                            datefmt='%Y%m%d%H%M%S')
+        logging.info('%s starting...', self.appName)
 
-        factory = KtSyncFac(self.cfg, self.caseDs)
+        factory = KtSyncFac(self.dNetTypes, self.caseDs)
         director = Director(factory)
         director.start()
 
@@ -751,7 +537,7 @@ class Main(object):
 # main here
 if __name__ == '__main__':
     main = Main()
-    main.checkArgv()
-    main.parseWorkEnv()
+    # main.checkArgv()
+    # main.parseWorkEnv()
     main.start()
-    logging.info('%s complete.', main.baseName)
+    logging.info('%s complete.', main.appName)
