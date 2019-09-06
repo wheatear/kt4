@@ -158,6 +158,7 @@ class HttpShortClient(object):
     def prepareTmpl(self):
         self.tmplReplaceNetInfo()
         self.makeHttpHead()
+        return True
 
     def makeHttpHead(self):
         httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
@@ -236,25 +237,24 @@ class HSSHWClient(HttpShortClient):
         self.isLogin = False
 
     def connectServer(self):
-        super(self.__class__, self).connectServer()
-
-        if self.remoteServer: self.remoteServer.close()
+        if self.remoteServer:
+            return self.remoteServer
         # if self.remoteServer: return self.remoteServer
         self.remoteServer = TcpClt(self.dNetInfo['IP'], int(self.dNetInfo['PORT']))
         return self.remoteServer
 
-    def makeHttpHead(self):
-        httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
-        # httpHead = '%s%s' % (httpHead, 'Accept: */*\r\n')
-        # httpHead = '%s%s' % (httpHead, 'Cache-Control: no-cache\r\n')
-        # httpHead = '%s%s' % (httpHead, 'Connection: close\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Length: ^<body_length^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Content-Type: text/xml; charset=utf-8\r\n')
-        httpHead = '%s%s' % (httpHead, 'Host: ^<IP^>:^<PORT^>\r\n')
-        httpHead = '%s%s' % (httpHead, 'Soapaction: ""\r\n')
-        httpHead = '%s%s' % (httpHead, 'User-Agent: Jakarta Commons-HttpClient/3.1\r\n\r\n')
-        self.httpHead = httpHead
-        self.httpheadReplaceNetInfo()
+    def makeLoginMsg(self):
+        loginBody = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:lgi="http://www.huawei.com/HLR9820/LGI"><soapenv:Header/><soapenv:Body><lgi:LGI><lgi:OPNAME>^<GLOBAL.USER^></lgi:OPNAME><lgi:PWD>^<GLOBAL.PASSWD^></lgi:PWD><lgi:HLRSN>^<GLOBAL.HLRSN^></lgi:HLRSN></lgi:LGI></soapenv:Body></soapenv:Envelope>'
+        loginCmd = CmdTemplate(loginBody)
+        for var in self.dNetInfo:
+            # logging.debug('find var %s', var)
+            # logging.debug('find var %s', order.dParam.keys())
+            paName = '^<%s^>' % var
+            if loginBody.find(paName) > -1:
+                loginBody = loginBody.replace(paName, self.dNetInfo[var])
+        contentLength = len(loginBody)
+        httpHead = self.httpHead.replace('^<body_length^>', str(contentLength))
+        self.loginRequest = '%s%s' % (httpHead, loginBody)
 
     def makeLgiHttpHead(self):
         httpHead = 'POST ^<GLOBAL.URL^> HTTP/1.1\r\n'
@@ -269,14 +269,43 @@ class HSSHWClient(HttpShortClient):
         self.httpHead = httpHead
         self.httpheadReplaceNetInfo()
 
+    def recvSessionId(self):
+        logging.info('receive session id...')
+        rspMsg = self.remoteServer.recv()
+        logging.debug(rspMsg)
+        logging.info('parse response...')
+        # location = 'Location: http://%s:%s' % (self.dNetInfo['IP'], self.dNetInfo['PORT'])
+        location = 'Location: http://[\d\.]+:%s' % self.dNetInfo['PORT']
+        # if location not in rspMsg:
+        #     logging.error('login fail, exit.')
+        #     return False
+        patn = '%s(/\w+)' % location
+        logging.debug('location pattern: %s' % patn)
+        m = re.search(patn,rspMsg)
+        logging.info('sessionid: %s', m.groups()[0])
+        self.sessionId = m.groups()[0]
+        self.dNetInfo['GLOBAL.URL'] = self.sessionId
+        return self.sessionId
+
     def login(self):
         self.connectServer()
+        self.makeLgiHttpHead()
+        self.makeLoginMsg()
+        logging.debug('send:%s', self.loginRequest)
+        self.remoteServer.send(self.loginRequest)
+        sessionId = self.recvSessionId()
+        logging.debug('login sessionid: %s', sessionId)
+        # time.sleep(1)
+        return sessionId
 
 
     def prepareTmpl(self):
         self.tmplReplaceNetInfo()
         self.makeHttpHead()
-        self.login()
+        if not self.login():
+            return False
+        self.makeHttpHead()
+        return True
 
 
 class ReqOrder(object):
@@ -640,7 +669,8 @@ class FileFac(object):
             logging.debug(netInfo)
             net = createInstance(self.main.appNameBody, netClassName, netInfo)
             net.aCmdTemplates = self.aCmdTemplates
-            net.prepareTmpl()
+            if not net.prepareTmpl():
+                return False
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
 
@@ -678,6 +708,8 @@ class FileFac(object):
 class HttpShortFFac(FileFac):
     pass
 
+class HSSHWFFac(HttpShortFFac):
+    pass
 
 class KtPsFFac(FileFac):
     def __init__(self, main):
@@ -770,6 +802,8 @@ class TableFac(FileFac):
 class HttpShortOrder(ReqOrder):
     pass
 
+class HSSHWOrder(HttpShortOrder):
+    pass
 
 class Director(object):
     def __init__(self, factory):
@@ -779,7 +813,9 @@ class Director(object):
 
     def start(self):
         self.factory.loadCmd()
-        self.factory.makeNet()
+        if not self.factory.makeNet():
+            logging.error('make net error, exit.')
+            return -1
         self.factory.openDs()
         self.factory.makeOrderFildName()
         self.fRsp = self.factory.openRsp()
