@@ -1,0 +1,17 @@
+
+create table EMPS_PROVISION as select * from ps_provision_100 WHERE 1=2;
+
+-- Create/Recreate indexes
+create index EMPS_BILLID_IDX on EMPS_PROVISION (BILL_ID);
+create index EMPS_CRE_IDX on EMPS_PROVISION (CREATE_DATE, PS_ID);
+-- create index EMPS_HAND_IDX on EMPS_PROVISION (HAND_NOTES);
+-- create index EMPS_PRIO_IDX on EMPS_PROVISION (PRIO_LEVEL);
+-- Create/Recreate primary, unique and foreign key constraints
+alter table EMPS_PROVISION
+  add constraint PK_EMPS_PROVISION primary key (PS_ID)
+  using index;
+
+create table EMPS_PROVISION_HIS as select * from EMPS_PROVISION WHERE 1=2;
+create index EMPS_HIS_BILLID_IDX on EMPS_PROVISION_HIS (BILL_ID);
+create index EMPS_HIS_CRE_IDX on EMPS_PROVISION_HIS (CREATE_DATE, PS_ID);
+create index EMPS_HIS_PSID_IDX on EMPS_PROVISION_HIS ( PS_ID);
