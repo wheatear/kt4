@@ -7,6 +7,7 @@ import sys
 import os
 import shutil
 import time
+import string
 import datetime
 import copy
 import multiprocessing
@@ -25,176 +26,8 @@ import re
 import sqlite3
 import threading
 # from config import *
+import ConfigParser
 
-
-class Conf(object):
-    def __init__(self, cfgfile):
-        self.cfgFile = cfgfile
-        self.logLevel = None
-        self.aClient = []
-        self.fCfg = None
-        self.dbinfo = {}
-
-    def loadLogLevel(self):
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            print('Can not open configuration file %s: %s' % (self.cfgFile, e))
-            exit(2)
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line[0] == '#':
-                continue
-            if line[:8] == 'LOGLEVEL':
-                param = line.split(' = ', 1)
-                logLevel = 'logging.%s' % param[1]
-                self.logLevel = eval(logLevel)
-                break
-        fCfg.close()
-        return self.logLevel
-
-    def openCfg(self):
-        if self.fCfg: return self.fCfg
-        try:
-            self.fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        return self.fCfg
-
-    def closeCfg(self):
-        if self.fCfg: self.fCfg.close()
-
-    def loadClient(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        clientSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                clientSection = 0
-                if client is not None: self.aClient.append(client)
-                client = None
-                continue
-            if line == '#provisioning client conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = Centrex()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'server':
-                client.serverIp = param[1]
-            elif param[0] == 'sockPort':
-                client.port = param[1]
-            elif param[0] == 'GLOBAL_USER':
-                client.user = param[1]
-            elif param[0] == 'GLOBAL_PASSWD':
-                client.passwd = param[1]
-            elif param[0] == 'GLOBAL_RTSNAME':
-                client.rtsname = param[1]
-            elif param[0] == 'GLOBAL_URL':
-                client.url = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
-
-    def loadEnv(self):
-        # super(self.__class__, self).__init__()
-        # for cli in self.aClient:
-        #     cfgFile = cli.
-        try:
-            fCfg = open(self.cfgFile, 'r')
-        except IOError, e:
-            logging.fatal('can not open configue file %s', self.cfgFile)
-            logging.fatal('exit.')
-            exit(2)
-        envSection = 0
-        client = None
-        for line in fCfg:
-            line = line.strip()
-            if len(line) == 0:
-                continue
-            if line == '#running envirment conf':
-                if clientSection == 1:
-                    clientSection = 0
-                    if client is not None: self.aClient.append(client)
-                    client = None
-
-                clientSection = 1
-                client = KtClient()
-                continue
-            if clientSection < 1:
-                continue
-            logging.debug(line)
-            param = line.split(' = ', 1)
-            if param[0] == 'prvnName':
-                client.ktName = param[1]
-            elif param[0] == 'dbusr':
-                client.dbUser = param[1]
-            elif param[0] == 'type':
-                client.ktType = param[1]
-            elif param[0] == 'dbpwd':
-                client.dbPwd = param[1]
-            elif param[0] == 'dbhost':
-                client.dbHost = param[1]
-            elif param[0] == 'dbport':
-                client.dbPort = param[1]
-            elif param[0] == 'dbsid':
-                client.dbSid = param[1]
-            elif param[0] == 'table':
-                client.orderTablePre = param[1]
-            elif param[0] == 'server':
-                client.syncServer = param[1]
-            elif param[0] == 'sockPort':
-                client.sockPort = param[1]
-        fCfg.close()
-        logging.info('load %d clients.', len(self.aClient))
-        return self.aClient
-
-    def loadDbinfo(self):
-        rows = self.openCfg()
-        dbSection = 0
-        client = None
-        dbRows = []
-        for i, line in enumerate(rows):
-            line = line.strip()
-            if len(line) == 0:
-                dbSection = 1
-                continue
-            if line == '#DBCONF':
-                dbSection = 1
-                continue
-            if dbSection < 1:
-                continue
-            logging.debug(line)
-            dbRows.append(i)
-            param = line.split(' = ', 1)
-            if len(param) > 1:
-                self.dbinfo[param[0]] = param[1]
-            else:
-                self.dbinfo[param[0]] = None
-        # self.removeUsed(dbRows)
-        self.dbinfo['connstr'] = '%s/%s@%s/%s' % (self.dbinfo['dbusr'], self.dbinfo['dbpwd'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        logging.info('load dbinfo, %s %s %s', self.dbinfo['dbusr'], self.dbinfo['dbhost'], self.dbinfo['dbsid'])
-        return self.dbinfo
 
 class KtHost(object):
     def __init__(self, hostName, hostIp, port, timeOut):
@@ -258,8 +91,9 @@ class KtSender(threading.Thread):
         return aFildName
 
     def run(self):
+        logging.info('ktsender starting...')
         if len(self.aFiles) == 0:
-            logging.info('no data file, redo template.')
+            logging.info('ktsender: no data file, redo template.')
             line = ''
             fi = self.builder.main.cmdTpl
             order = KtOrder(line, fi)
@@ -267,26 +101,27 @@ class KtSender(threading.Thread):
             self.orderQueue.put(order, 1)
             return
 
+        i = 0
         for fi in self.aFiles:
             # fileBody, fileExt = os.path.splitext(fi)
             # aCmdTpl = self.builder.dFildCmdMap[fileExt]
-            logging.info('process file %s', fi)
-            aTpl = self.dFiles[fi][2]
+            logging.info('ktsender: process file %s', fi)
+            # aTpl = self.dFiles[fi][2]
             self.kt.aCmdTemplates = self.builder.aCmdTemplates
+            cmdNum = len(self.builder.aCmdTemplates)
 
-            i = 0
             fp = self.main.openFile(fi, 'r')
             aFieldName = self.makeOrderFildName(fp)
             for line in fp:
                 line = line.strip()
                 if len(line) < 1:
                     continue
-                i += 1
+                i += cmdNum
                 if i > 199:
                     i = 0
                     time.sleep(3)
                     while self.orderQueue.qsize() > 1000:
-                        logging.info('order queue size exceed 1000, sleep 10')
+                        logging.info('ktsender: order queue size exceed 1000, sleep 10')
                         time.sleep(10)
                 logging.debug(line)
                 aPara = line.split()
@@ -299,8 +134,12 @@ class KtSender(threading.Thread):
                 order.setPara(aPara)
                 self.kt.sendOrder(order)
                 self.orderQueue.put(order, 1)
+                if i > main.rate:
+                    i = 0
+                    logging.info('process %d orders, and sleep 1 second', i)
+                    time.sleep(1)
             fp.close()
-            logging.info('read %s complete, and delete.', fi)
+            logging.info('ktsender: read %s complete, and delete.', fi)
             os.remove(fi)
 
 
@@ -318,8 +157,9 @@ class KtRecver(threading.Thread):
         # self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
+        logging.info('ktrecver starting...')
         if len(self.dFiles) == 0:
-            logging.info('no file')
+            logging.info('ktrecver: no file')
             return
         for file in self.dFiles:
             self.doneOrders[file] = 0
@@ -329,12 +169,12 @@ class KtRecver(threading.Thread):
         while 1:
             order = None
             if len(self.dFiles) == 0:
-                logging.info('all files completed.')
+                logging.info('ktrecver: all files completed.')
                 break
             if self.orderQueue.empty():
                 emptyCounter += 1
                 if emptyCounter > 20:
-                    logging.info('exceed 20 times empty, exit.')
+                    logging.info('ktrecver: exceed 20 times empty, exit.')
                     for file in self.dFiles.keys():
                         aFileInfo = self.dFiles.pop(file)
                         self.dealFile(aFileInfo)
@@ -346,7 +186,7 @@ class KtRecver(threading.Thread):
                 i = 0
                 time.sleep(3)
             order = self.orderQueue.get(1)
-            logging.debug('get order %s %d from queue', order.aReq[0]['BILL_ID'], order.aReq[0]['PS_ID'])
+            logging.debug('ktrecver: get order %s %d from queue', order.aReq[0]['BILL_ID'], order.aReq[0]['PS_ID'])
             self.kt.recvOrder(order)
             if len(order.aWaitPs) > 0:
                 self.orderQueue.put(order, 1)
@@ -354,12 +194,12 @@ class KtRecver(threading.Thread):
             self.makeRsp(order)
             inFile = order.file
             self.doneOrders[inFile] += 1
-            logging.debug('done: %d; all: %d', self.doneOrders[inFile], self.dFiles[inFile][1])
+            logging.debug('ktrecver: done: %d; all: %d', self.doneOrders[inFile], self.dFiles[inFile][1])
             if self.doneOrders[inFile] == self.dFiles[inFile][1]:
-                logging.info('file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
+                logging.info('ktrecver: file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
                 aFileInfo = self.dFiles.pop(inFile)
                 self.dealFile(aFileInfo)
-            time.sleep(1)
+            # time.sleep(1)
 
     def checkSub(self, orderRsp, inFile):
         rsp = orderRsp[3]
@@ -943,7 +783,7 @@ class Builder(object):
 
     def loadCmd(self):
         logging.info('loading cmd template')
-        tplPatt = self.main.tplFile
+        tplPatt = self.main.cmdTpl
         aTplFiles = glob.glob(tplPatt)
         logging.info('template files: %s', aTplFiles)
         for tplFile in aTplFiles:
@@ -1142,8 +982,8 @@ class DbConn(object):
             # self.conn = orcl.connect(self.dbUser, self.dbPwd, dsn)
             DbConn.dConn[self.connId] = self.conn
         except Exception, e:
-            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.cfg.dbinfo['dbhost'],
-                          self.cfg.dbinfo['dbusr'], self.cfg.dbinfo['dbsid'], e)
+            logging.fatal('could not connect to oracle(%s:%s/%s), %s', self.dbinfo['dbhost'],
+                          self.dbinfo['dbusr'], self.dbinfo['dbsid'], e)
             exit()
         return self.conn
 
@@ -1263,9 +1103,7 @@ class KtPsTmpl(object):
 class KtPsFFac(object):
     def __init__(self, main):
         self.main = main
-        self.netType = main.netType
-        self.netCode = main.netCode
-        self.cmdTpl = main.tplFile
+        self.cmdTpl = main.cmdTpl
         self.inFile = main.inFile
         self.aFiles = []
         self.dFiles = {}
@@ -1315,16 +1153,19 @@ class KtPsFFac(object):
             fileOutRsp = os.path.join(self.main.dirOut, fileRsp)
 
             count = -1
-            for count, line in enumerate(open(fi, 'rU')):
-                pass
-            # count += 1
+            # for count, line in enumerate(open(fi, 'rU')):
+            #     pass
+            with open(fi, 'r') as f:
+                for eachLine in f:
+                    if not eachLine.strip():
+                        count += 1
             self.dFiles[fi] = [fileBase,count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp]
             logging.info('file: %s %d', fi, count)
             # self.dFileSize[fi] = count
         return self.dFiles
 
     def loadCmd(self):
-        logging.info('loading cmd template %s', self.cmdTpl)
+        logging.info('loading cmd template from file %s', self.cmdTpl)
         tplFile = os.path.join(self.main.dirTpl, self.cmdTpl)
         fileName = os.path.basename(tplFile)
         tplName = os.path.splitext(fileName)[0]
@@ -1361,7 +1202,7 @@ class KtPsFFac(object):
         # logging.info(self.aCmdTemplates)
 
     def makeConn(self, connId):
-        conn = DbConn(connId, self.main.cfg.dbinfo)
+        conn = DbConn(connId, self.main.dDbInfo)
         return conn
 
     def makeKtClient(self, ktName):
@@ -1371,7 +1212,7 @@ class KtPsFFac(object):
         return kt
 
     def buildQueue(self):
-        self.orderQueue = Queue.Queue(1000)
+        self.orderQueue = Queue.Queue(main.maxQueue)
         return self.orderQueue
 
     def buildKtSender(self):
@@ -1534,33 +1375,23 @@ class Main(object):
         self.writeConn = None
         self.inFile = None
         self.cmdTpl = None
-        self.tplFile = None
+        self.tmplId = None
         self.fCmd = None
-        self.netType = None
-        self.netCode = None
+        self.rate = None
         self.today = time.strftime("%Y%m%d", time.localtime())
         self.nowtime = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
     def checkArgv(self):
-        dirBin, appName = os.path.split(self.Name)
-        self.dirBin = dirBin
-        self.appName = appName
-        appNameBody, appNameExt = os.path.splitext(self.appName)
-        self.appNameBody = appNameBody
-        self.appNameExt = appNameExt
+        self.dirBase = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.appName = os.path.basename(self.Name)
+        self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
+        # print('base dir: %s' % self.dirBase)
 
         if self.argc < 2:
             self.usage()
-            # self.inFile = 'wsdx_cycle_%s.cy?' % self.today
-        # else:
-        #     self.inFile = sys.argv[1]
         argvs = sys.argv[1:]
         self.facType = 't'
         self.cmdTpl = 'ps_model_summary'
-        self.tplFile = None
-        self.fCmd = None
-        self.tmplId = None
-        self.inFile = None
         try:
             opts, arvs = getopt.getopt(argvs, "t:f:p:r:")
         except getopt.GetoptError, e:
@@ -1575,28 +1406,22 @@ class Main(object):
                 self.cmdTpl = arg
             elif opt == '-p':
                 self.tmplId = arg
+            elif opt == '-r':
+                self.rate = arg
         if len(arvs) > 0:
             self.inFile = arvs[0]
 
     def parseWorkEnv(self):
-        if self.dirBin=='' or self.dirBin=='.':
-            self.dirBin = '.'
-            self.dirApp = '..'
-        else:
-            dirApp, dirBinName = os.path.split(self.dirBin)
-            if dirApp=='':
-                self.dirApp = '.'
-            else:
-                self.dirApp = dirApp
-        self.dirLog = os.path.join(self.dirApp, 'log')
-        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirBin = os.path.join(self.dirBase, 'bin')
+        self.dirLog = os.path.join(self.dirBase, 'log')
+        self.dirCfg = os.path.join(self.dirBase, 'config')
         # self.dirCfg = self.dirBin
-        self.dirBack = os.path.join(self.dirApp, 'back')
-        self.dirIn = os.path.join(self.dirApp, 'input')
-        self.dirLib = os.path.join(self.dirApp, 'lib')
-        self.dirOut = os.path.join(self.dirApp, 'output')
-        self.dirWork = os.path.join(self.dirApp, 'work')
-        self.dirTpl = os.path.join(self.dirApp, 'template')
+        self.dirBack = os.path.join(self.dirBase, 'back')
+        self.dirIn = os.path.join(self.dirBase, 'input')
+        self.dirLib = os.path.join(self.dirBase, 'lib')
+        self.dirOut = os.path.join(self.dirBase, 'output')
+        self.dirWork = os.path.join(self.dirBase, 'work')
+        self.dirTpl = os.path.join(self.dirBase, 'template')
 
         cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.appNameBody, self.today)
@@ -1605,24 +1430,60 @@ class Main(object):
         tplName = '*.tpl'
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
-        self.tplFile = os.path.join(self.dirTpl, self.cmdTpl)
-        # self.logPre = os.path.join(self.dirLog, logPre)
-        # self.outFile = os.path.join(self.dirOut, outName)
+        # if self.facType == 'f':
+        #     self.cmdTpl = os.path.join(self.dirTpl, self.cmdTpl)
+
+    def readCfg(self):
+        self.cfg = ConfigParser.ConfigParser()
+        self.cfg.read(self.cfgFile)
+        self.dDbInfo = {}
+        # self.dNetTypes = {}
+
+        if 'main' not in self.cfg.sections():
+            print('there is no main conf info in confige file')
+            exit(-1)
+        if not self.rate:
+            try:
+                self.rate = self.cfg.getint('main', 'rate')
+            except KeyError, e:
+                self.rate = 30
+        # 取队列长度，默认为1000
+        try:
+            self.maxQueue = self.cfg.getint('main', 'maxqueue')
+        except KeyError:
+            self.maxQueue = 1000
+
+        if 'db' not in self.cfg.sections():
+            print('there is no db conf info in confige file')
+            exit(-1)
+        for inf in self.cfg.items('db'):
+            self.dDbInfo[inf[0]] = inf[1]
+        try:
+            dbusr = self.dDbInfo['dbusr']
+            dbpwd = self.dDbInfo['dbusr']
+            dbhost = self.dDbInfo['dbusr']
+            dbsid = self.dDbInfo['dbusr']
+        except KeyError, e:
+            print('not db conf:', e)
+            exit(-1)
+        self.dDbInfo['connstr'] = '%s/%s@%s/%s' % (dbusr, dbpwd, dbhost, dbsid)
+        # print(self.dDbInfo)
 
     def usage(self):
-        print "Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName
+        print("Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName)
         print('option:')
         print(u'-t orderTmpl : 指定模板表orderTmpl，默认表是ps_model_summary'.encode('gbk'))
         print(u'-f orderTmpl : 指定模板文件orderTmpl'.encode('gbk'))
         print(u'-p psid :      取模板表中ps_id为psid的记录为模板，没有这个参数取整个表为模板'.encode('gbk'))
+        print(u'-r rate :      处理速率,订单/秒'.encode('gbk'))
         print(u'datafile :     数据文件，取里面的号码替换掉模板中的号码发开通'.encode('gbk'))
-        print "example:"
-        print "\t%s pccnum" % (self.appName)
-        print "\t%s -t ps_model_summary" % (self.appName)
-        print "\t%s -t ps_model_summary -p 2451845353" % (self.appName)
-        print "\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName)
-        print "\t%s -f kt_hlr" % (self.appName)
-        print "\t%s -f kt_hlr pccnum" % (self.appName)
+        print("example:")
+        print("\t%s pccnum" % (self.appName))
+        print("\t%s -t ps_model_summary" % (self.appName))
+        print("\t%s -t ps_model_summary -p 2451845353" % (self.appName))
+        print("\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName))
+        print("\t%s -f kt_hlr" % (self.appName))
+        print("\t%s -f kt_hlr pccnum" % (self.appName))
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -1635,12 +1496,12 @@ class Main(object):
 
     def connectServer(self):
         if self.conn is not None: return self.conn
-        self.conn = DbConn('main', self.cfg.dbinfo)
+        self.conn = DbConn('main', self.dDbInfo)
         self.conn.connectServer()
         return self.conn
 
     # def getConn(self, connId):
-    #     conn = DbConn(connId, self.cfg.dbinfo)
+    #     conn = DbConn(connId, self.dDbInfo)
     #     return conn
 
     def makeFactory(self):
@@ -1658,10 +1519,10 @@ class Main(object):
 
     def makeFileFactory(self):
         if not self.fCmd:
-            self.fCmd = self.openFile(self.tplFile, 'r')
-            logging.info('cmd template file: %s', self.tplFile)
+            self.fCmd = self.openFile(self.cmdTpl, 'r')
+            logging.info('cmd template file: %s', self.cmdTpl)
             if not self.fCmd:
-                logging.fatal('can not open command file %s. exit.', self.tplFile)
+                logging.fatal('can not open command file %s. exit.', self.cmdTpl)
                 exit(2)
 
         for line in self.fCmd:
@@ -1689,16 +1550,15 @@ class Main(object):
     def start(self):
         self.checkArgv()
         self.parseWorkEnv()
+        self.readCfg()
 
-        self.cfg = Conf(self.cfgFile)
-        self.logLevel = self.cfg.loadLogLevel()
+        self.logLevel = eval('logging.%s' % self.cfg.get("main", "loglevel"))
         # self.logLevel = logging.DEBUG
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
         logging.info('infile: %s' % self.inFile)
 
-        self.cfg.loadDbinfo()
         self.connectServer()
         factory = self.makeFactory()
         # print('respfile: %s' % factory.respFullName)

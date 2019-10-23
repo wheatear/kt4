@@ -314,7 +314,7 @@ class CfgExport(object):
         self.dbInfo = '%s/%s@%s' % (self.conn.dbInfo['dbusr'], self.conn.dbInfo['dbpwd'], self.conn.dbInfo['tns'])
 
     def export(self):
-        cmd = 'exp %s tables=%s file=%s' % (self.dbInfo, self.expTalbes, self.outFile)
+        cmd = 'exp \'%s\' tables=%s file=%s' % (self.dbInfo, self.expTalbes, self.outFile)
         # print(cmd)
         logging.info(cmd)
         (outStr, exitSts) = pexpect.run(cmd, timeout=300, withexitstatus=1)
