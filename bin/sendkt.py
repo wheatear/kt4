@@ -51,7 +51,7 @@ class KtOrder(object):
         self.no = None
         self.aParamName = []
         self.dParam = {}
-        self.net = None
+        # self.net = None
         self.aReq = []
         self.aResp = []
         self.aWaitPs = []
@@ -72,6 +72,7 @@ class KtOrder(object):
         return status
 
 class KtSender(threading.Thread):
+    '''ktclient to send order'''
     def __init__(self, builder):
         threading.Thread.__init__(self)
         self.builder = builder
@@ -81,7 +82,6 @@ class KtSender(threading.Thread):
         self.dFiles = builder.dFiles
         self.kt = builder.makeKtClient('SENDER')
         self.orderQueue = builder.orderQueue
-        # self.curPsid = self.conn.prepareSql(self.sqlPsid)
 
     def makeOrderFildName(self, fIn):
         fildName = fIn.readline()
@@ -101,49 +101,38 @@ class KtSender(threading.Thread):
             self.orderQueue.put(order, 1)
             return
 
+        self.kt.aCmdTemplates = self.builder.aCmdTemplates
+        cmdNum = len(self.builder.aCmdTemplates)
         i = 0
         for fi in self.aFiles:
-            # fileBody, fileExt = os.path.splitext(fi)
-            # aCmdTpl = self.builder.dFildCmdMap[fileExt]
             logging.info('ktsender: process file %s', fi)
             # aTpl = self.dFiles[fi][2]
-            self.kt.aCmdTemplates = self.builder.aCmdTemplates
-            cmdNum = len(self.builder.aCmdTemplates)
 
             fp = self.main.openFile(fi, 'r')
             aFieldName = self.makeOrderFildName(fp)
             for line in fp:
                 line = line.strip()
-                if len(line) < 1:
+                if not line:
                     continue
                 i += cmdNum
-                if i > 199:
-                    i = 0
-                    time.sleep(3)
-                    while self.orderQueue.qsize() > 1000:
-                        logging.info('ktsender: order queue size exceed 1000, sleep 10')
-                        time.sleep(10)
                 logging.debug(line)
                 aPara = line.split()
-                # billId = aPara[2]
-                # subBillId = aPara[1]
-                # aFieldName = ['BILL_ID', 'SUB_BILL_ID']
-                # aKtPara = [billId, subBillId]
                 order = KtOrder(line, fi)
                 order.setParaName(aFieldName)
                 order.setPara(aPara)
                 self.kt.sendOrder(order)
                 self.orderQueue.put(order, 1)
                 if i > main.rate:
+                    logging.info('ktsender process %d orders, and sleep 1 second', i)
                     i = 0
-                    logging.info('process %d orders, and sleep 1 second', i)
                     time.sleep(1)
             fp.close()
-            logging.info('ktsender: read %s complete, and delete.', fi)
+            logging.info('ktsender: send %s complete.', fi)
             os.remove(fi)
 
 
 class KtRecver(threading.Thread):
+    '''ktclient to recerve order result'''
     def __init__(self, builder):
         threading.Thread.__init__(self)
         self.builder = builder
@@ -154,6 +143,7 @@ class KtRecver(threading.Thread):
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
         self.doneOrders = {}
+        self.interval = self.main.rate * 2 / len(self.builder.aCmdTemplates) + 1
         # self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
@@ -166,31 +156,31 @@ class KtRecver(threading.Thread):
         time.sleep(10)
         emptyCounter = 0
         i = 0
-        while 1:
+        while self.dFiles:
             order = None
-            if len(self.dFiles) == 0:
-                logging.info('ktrecver: all files completed.')
-                break
-            if self.orderQueue.empty():
+            order = self.orderQueue.get()
+            if not order:
                 emptyCounter += 1
-                if emptyCounter > 20:
+                if emptyCounter > 30:
                     logging.info('ktrecver: exceed 20 times empty, exit.')
                     for file in self.dFiles.keys():
                         aFileInfo = self.dFiles.pop(file)
                         self.dealFile(aFileInfo)
                     break
-                time.sleep(30)
+                time.sleep(10)
                 continue
-            i += 1
-            if i > 199:
-                i = 0
-                time.sleep(3)
-            order = self.orderQueue.get(1)
+            emptyCounter = 0
             logging.debug('ktrecver: get order %s %d from queue', order.aReq[0]['BILL_ID'], order.aReq[0]['PS_ID'])
             self.kt.recvOrder(order)
             if len(order.aWaitPs) > 0:
                 self.orderQueue.put(order, 1)
+                i += 1
+                if i > self.interval:
+                    logging.info('receiver process %d unended orders, and sleep 1 second', i)
+                    i = 0
+                    time.sleep(1)
                 continue
+            i = 0
             self.makeRsp(order)
             inFile = order.file
             self.doneOrders[inFile] += 1
@@ -199,7 +189,8 @@ class KtRecver(threading.Thread):
                 logging.info('ktrecver: file %s completed after process %d lines.', inFile, self.doneOrders[inFile])
                 aFileInfo = self.dFiles.pop(inFile)
                 self.dealFile(aFileInfo)
-            # time.sleep(1)
+        else:
+            logging.info('ktrecver: all files completed.')
 
     def checkSub(self, orderRsp, inFile):
         rsp = orderRsp[3]
@@ -1059,22 +1050,21 @@ class DbConn(object):
 
 
 class Director(object):
-    def __init__(self, fac):
-        self.factory = fac
+    def __init__(self, bld):
+        self.builder = bld
         self.shutDown = None
         self.fRsp = None
 
     def start(self):
-        if self.factory.inFile is not None:
+        if self.builder.inFile:
             # print(self.factory.inFile)
             logging.info('find in files')
-            self.factory.findFile()
-            self.factory.lineCount()
-        self.factory.loadCmd()
-        # self.factory.buildKtClient()
-        queue = self.factory.buildQueue()
-        sender = self.factory.buildKtSender()
-        recver = self.factory.buildKtRecver()
+            self.builder.findFile()
+            self.builder.lineCount()
+        self.builder.loadCmd()
+        queue = self.builder.buildQueue()
+        sender = self.builder.buildKtSender()
+        recver = self.builder.buildKtRecver()
 
         logging.info('sender start.')
         sender.start()
@@ -1116,22 +1106,22 @@ class KtPsFFac(object):
         self.aCmdTemplates = []
 
     def findFile(self):
-        logging.info('find files ')
+        logging.info('find data files ')
         if self.inFile:
             filePatt = os.path.join(self.main.dirIn, self.inFile)
             self.aFiles = glob.glob(filePatt)
             # print('file: %s  num: %d' % (self.aFiles, len(self.aFiles)))
-            if len(self.aFiles) == 0:
+            if not self.aFiles:
                 logging.error('no find data file %s in %s', self.inFile, self.main.dirIn)
                 print('no find data file %s in %s' % (self.inFile, self.main.dirIn))
                 exit(-1)
-            logging.info('find files: %s', self.aFiles)
+            logging.info('find data files: %s', self.aFiles)
         else:
             logging.info('no data file')
         return self.aFiles
 
     def lineCount(self):
-        if len(self.aFiles) == 0:
+        if not self.aFiles:
             fileBase = self.main.cmdTpl
             fileRsp = '%s.rsp' % self.main.cmdTpl
             fileWkRsp = os.path.join(self.main.dirWork, fileRsp)
@@ -1157,7 +1147,7 @@ class KtPsFFac(object):
             #     pass
             with open(fi, 'r') as f:
                 for eachLine in f:
-                    if not eachLine.strip():
+                    if eachLine.strip():
                         count += 1
             self.dFiles[fi] = [fileBase,count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp]
             logging.info('file: %s %d', fi, count)
@@ -1407,7 +1397,7 @@ class Main(object):
             elif opt == '-p':
                 self.tmplId = arg
             elif opt == '-r':
-                self.rate = arg
+                self.rate = int(arg)
         if len(arvs) > 0:
             self.inFile = arvs[0]
 
@@ -1482,6 +1472,7 @@ class Main(object):
         print("\t%s -t ps_model_summary" % (self.appName))
         print("\t%s -t ps_model_summary -p 2451845353" % (self.appName))
         print("\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName))
+        print("\t%s -r5 -t ps_model_summary -p 2451845353 pccnum" % (self.appName))
         print("\t%s -f kt_hlr" % (self.appName))
         print("\t%s -f kt_hlr pccnum" % (self.appName))
         exit(1)
@@ -1499,10 +1490,6 @@ class Main(object):
         self.conn = DbConn('main', self.dDbInfo)
         self.conn.connectServer()
         return self.conn
-
-    # def getConn(self, connId):
-    #     conn = DbConn(connId, self.dDbInfo)
-    #     return conn
 
     def makeFactory(self):
         if self.facType == 't':
@@ -1557,7 +1544,11 @@ class Main(object):
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%H%M%S')
         logging.info('%s starting...' % self.appName)
+        logging.info('cmdtpl: %s' % self.cmdTpl)
         logging.info('infile: %s' % self.inFile)
+        if self.tmplId:
+            logging.info('psid: %s', self.tmplId)
+        logging.info('process rate: %d/second', self.rate)
 
         self.connectServer()
         factory = self.makeFactory()
