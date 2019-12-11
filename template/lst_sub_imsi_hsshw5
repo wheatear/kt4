@@ -1,0 +1,16 @@
+#NETTYPE = HSSHW
+#NETCODE = HSSHW5
+
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hss="http://www.chinamobile.com/HSS/">
+   <soapenv:Header>
+      <hss:PassWord>^<GLOBAL.PASSWD^></hss:PassWord>
+      <hss:UserName>^<GLOBAL.USER^></hss:UserName>
+   </soapenv:Header>
+   <soapenv:Body>
+      <hss:LST_SUB>
+         <hss:HLRSN>^<GLOBAL.HLRSN^></hss:HLRSN>
+         <hss:IMSI>^<SUB_BILL_ID^></hss:IMSI>
+         <hss:DETAIL>TRUE</hss:DETAIL>
+      </hss:LST_SUB>
+   </soapenv:Body>
+</soapenv:Envelope>

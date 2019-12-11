@@ -625,7 +625,11 @@ class FileFac(object):
 
     def saveResp(self, order):
         for rsp in order.aResp:
-            self.resp.write('%s %s%s' % (order.dParam['BILL_ID'], rsp, os.linesep))
+            strOrder = ''
+            for k in order.dParam:
+                strOrder = '%s %s:%s' % (strOrder, k, order.dParam[k])
+            strOrder = strOrder[1:]
+            self.resp.write('%s %s%s' % (strOrder, rsp, os.linesep))
 
     def loadCmd(self):
         tmpl = None
