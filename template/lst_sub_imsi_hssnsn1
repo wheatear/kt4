@@ -1,4 +1,4 @@
-#NETTYPE = HSSNSN
+#NETTYPE = HttpShort
 #NETCODE = HSSNSN1
 
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hss="http://www.chinamobile.com/HSS/">
