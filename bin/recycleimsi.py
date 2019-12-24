@@ -102,6 +102,7 @@ class KtSender(threading.Thread):
             return
 
         self.kt.aCmdTemplates = self.builder.dCmdTplGrp['DISP_IMSI']
+        # print(self.kt.aCmdTemplates)
         cmdNum = len(self.kt.aCmdTemplates)
         i = 0
         for fi in self.aFiles:
@@ -143,7 +144,8 @@ class KtRecver(threading.Thread):
         self.orderQueue = builder.orderQueue
         self.dOrder = {}
         self.doneOrders = {}
-        self.interval = self.main.rate * 2 / len(self.builder.aCmdTemplates) + 1
+        # self.interval = self.main.rate * 2 / len(self.builder.aCmdTemplates) + 1
+        self.interval = self.main.rate * 2 / 1 + 1
         # self.pattImsi = re.compile(r'IMSI1=(\d{15});')
 
     def run(self):
@@ -208,15 +210,20 @@ class KtRecver(threading.Thread):
 
     def makeRsp(self, order):
         inFile = order.file
-        fp = self.dFiles[inFile][4]
+        fpSuc = self.dFiles[inFile][4]
+        fpErr = self.dFiles[inFile][7]
         sRsp = order.line
         for rsp in order.aResp:
             psId = rsp[0]
             psStatus = rsp[1]
             failReason = rsp[2]
             # sRsp = '%d %d %s %s' % (psId, psStatus, sRsp, failReason)
-            sRsp = '%d %d %s %s' % (psId, psStatus, order.line, failReason)
-            fp.write('%s%s' % (sRsp, os.linesep))
+            sRsp = '%s %d %d %s' % (order.line, psId, psStatus, failReason)
+            if psStatus == -1:
+                self.kt.sendOrder(order)
+                fpSuc.write('%s%s' % (sRsp, os.linesep))
+            else:
+                fpErr.write('%s%s' % (sRsp, os.linesep))
         # fp.write('%s%s' % (sRsp, os.linesep))
         logging.debug(sRsp)
 
@@ -229,6 +236,14 @@ class KtRecver(threading.Thread):
         fileBkRsp = os.path.join(self.main.dirBack, os.path.basename(fileWkRsp))
         shutil.copy(fileWkRsp, fileBkRsp)
         os.rename(fileWkRsp, fileOutRsp)
+
+        fWkErr = aFileInfo[7]
+        fWkErr.close()
+        fileWkErr = aFileInfo[6]
+        fileOutErr = aFileInfo[8]
+        fileBkErr = os.path.join(self.main.dirBack, os.path.basename(fileWkErr))
+        shutil.copy(fileWkErr, fileBkErr)
+        os.rename(fileWkErr, fileOutErr)
         logging.info('%s complete', aFileInfo[0])
 
 
@@ -1183,6 +1198,11 @@ class KtPsFFac(object):
             fWkRsp = self.main.openFile(fileWkRsp, 'w')
             fileOutRsp = os.path.join(self.main.dirOut, fileRsp)
 
+            fileErr = '%s.err' % fileBase
+            fileWkErr = os.path.join(self.main.dirWork, fileErr)
+            fWkErr = self.main.openFile(fileWkErr, 'w')
+            fileOutErr = os.path.join(self.main.dirOut, fileErr)
+
             count = -1
             # for count, line in enumerate(open(fi, 'rU')):
             #     pass
@@ -1190,7 +1210,7 @@ class KtPsFFac(object):
                 for eachLine in f:
                     if eachLine.strip():
                         count += 1
-            self.dFiles[fi] = [fileBase,count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp]
+            self.dFiles[fi] = [fileBase,count, self.aCmdTemplates, fileWkRsp, fWkRsp, fileOutRsp, fileWkErr, fWkErr, fileOutErr]
             logging.info('file: %s %d', fi, count)
             # self.dFileSize[fi] = count
         return self.dFiles
@@ -1391,8 +1411,8 @@ class TableFac(KtPsFFac):
         tmplCmd['PS_PARAM'] = 'DISP_IMSI=4;'
         tmplCmd['OLD_PS_ID'] = '22222222'
         tmplCmd['PS_MODEL_NAME'] = 'DISP_IMSI'
-        tmpl = KtPsTmpl(tmplCmd)
-        aCmdTmpl = [tmpl]
+        # tmpl = KtPsTmpl(tmplCmd)
+        aCmdTmpl.append(tmplCmd)
         self.dCmdTplGrp[tplName] = aCmdTmpl
 
     def loadDelImsiCmd(self):
@@ -1409,8 +1429,8 @@ class TableFac(KtPsFFac):
         tmplCmd['PS_PARAM'] = 'AUC=3;'
         tmplCmd['OLD_PS_ID'] = '33333333'
         tmplCmd['PS_MODEL_NAME'] = 'DEL_IMSI'
-        tmpl = KtPsTmpl(tmplCmd)
-        aCmdTmpl = [tmpl]
+        # tmpl = KtPsTmpl(tmplCmd)
+        aCmdTmpl.append(tmplCmd)
         self.dCmdTplGrp[tplName] = aCmdTmpl
 
     def loadCommonCmd(self):
@@ -1459,26 +1479,18 @@ class Main(object):
         self.appNameBody, self.appNameExt = os.path.splitext(self.appName)
         # print('base dir: %s' % self.dirBase)
 
-        if self.argc < 2:
+        if self.argc < 1:
             self.usage()
         argvs = sys.argv[1:]
         self.facType = 't'
         self.cmdTpl = 'ps_model_summary'
         try:
-            opts, arvs = getopt.getopt(argvs, "t:f:p:r:")
+            opts, arvs = getopt.getopt(argvs, "r:")
         except getopt.GetoptError, e:
             print 'get opt error:%s. %s' % (argvs, e)
             self.usage()
         for opt, arg in opts:
-            if opt == '-t':
-                self.facType = 't'
-                self.cmdTpl = arg
-            elif opt == '-f':
-                self.facType = 'f'
-                self.cmdTpl = arg
-            elif opt == '-p':
-                self.tmplId = arg
-            elif opt == '-r':
+            if opt == '-r':
                 self.rate = int(arg)
         if len(arvs) > 0:
             self.inFile = arvs[0]
@@ -1542,21 +1554,12 @@ class Main(object):
         # print(self.dDbInfo)
 
     def usage(self):
-        print("Usage: %s [-t|f orderTmpl] [-p psid] [datafile]" % self.appName)
+        print("Usage: %s [-r] [datafile]" % self.appName)
         print('option:')
-        print(u'-t orderTmpl : 指定模板表orderTmpl，默认表是ps_model_summary'.encode('gbk'))
-        print(u'-f orderTmpl : 指定模板文件orderTmpl'.encode('gbk'))
-        print(u'-p psid :      取模板表中ps_id为psid的记录为模板，没有这个参数取整个表为模板'.encode('gbk'))
         print(u'-r rate :      处理速率,订单/秒'.encode('gbk'))
         print(u'datafile :     数据文件，取里面的号码替换掉模板中的号码发开通'.encode('gbk'))
         print("example:")
-        print("\t%s pccnum" % (self.appName))
-        print("\t%s -t ps_model_summary" % (self.appName))
-        print("\t%s -t ps_model_summary -p 2451845353" % (self.appName))
-        print("\t%s -t ps_model_summary -p 2451845353 pccnum" % (self.appName))
-        print("\t%s -r5 -t ps_model_summary -p 2451845353 pccnum" % (self.appName))
-        print("\t%s -f kt_hlr" % (self.appName))
-        print("\t%s -f kt_hlr pccnum" % (self.appName))
+        print("\t%s -r5 pccnum" % (self.appName))
         exit(1)
 
     def openFile(self, fileName, mode):
