@@ -60,8 +60,8 @@ class CfgImport(expscfg.CfgExport):
             cur.close()
 
     def importCfg(self):
-        cmd = 'imp %s file=%s full=y ignore=y' % (self.dbInfo, self.inFile)
-        # print(cmd)
+        cmd = r"imp \'%s\' file=%s full=y ignore=y" % (self.dbInfo, self.inFile)
+        print(cmd)
         logging.info(cmd)
         (outStr, exitSts) = pexpect.run(cmd, timeout=300, withexitstatus=1)
         # print(exitSts)

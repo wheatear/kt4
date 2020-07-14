@@ -433,6 +433,7 @@ class KtClient(object):
                 if m is not None:
                     rpl = ';%s=%s;' % (para, order.dParam[para])
                     cmd['PS_PARAM'] = psParam.replace(m.group(), rpl)
+                    psParam = cmd['PS_PARAM']
 
     def getOrderId(self, order):
         # sql = self.__class__.dSql['OrderId']
