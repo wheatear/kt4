@@ -130,6 +130,7 @@ class HttpShortClient(object):
         self.httpHead = None
         self.httpBody = None
         self.remoteServer = None
+        self.prepared = False
         # for k in self.dNetInfo:
         #     uk = string.upper(k)
         #     self.dNetInfo[uk] = self.dNetInfo[k]
@@ -156,8 +157,10 @@ class HttpShortClient(object):
                 self.httpHead = httpHead
 
     def prepareTmpl(self):
-        self.tmplReplaceNetInfo()
-        self.makeHttpHead()
+        if not self.prepared:
+            self.tmplReplaceNetInfo()
+            self.makeHttpHead()
+            self.prepared = True
         return True
 
     def makeHttpHead(self):
@@ -193,6 +196,9 @@ class HttpShortClient(object):
             order.aReqMsg.append(httpRequest)
 
     def sendOrder(self, order):
+        if not self.prepared:
+            if not self.prepareTmpl():
+                return False
         self.makeHttpMsg(order)
         self.connectServer()
         # logging.debug(order.httpRequest)
@@ -300,11 +306,13 @@ class HSSHWClient(HttpShortClient):
 
 
     def prepareTmpl(self):
-        self.tmplReplaceNetInfo()
-        self.makeHttpHead()
-        if not self.login():
-            return False
-        self.makeHttpHead()
+        if not self.prepared:
+            self.tmplReplaceNetInfo()
+            self.makeHttpHead()
+            if not self.login():
+                return False
+            self.makeHttpHead()
+            self.prepared = True
         return True
 
 
@@ -483,6 +491,8 @@ class KtPsClient(HttpShortClient):
         return cur
 
     def prepareTmpl(self):
+        if not self.prepared:
+            self.prepared = True
         return True
 
     def setOrderCmd(self, order):
@@ -668,13 +678,13 @@ class FileFac(object):
         for netInfo in self.aNetInfo:
             # print netInfo
             netCode = netInfo['NETCODE']
-            if self.netCode != netCode:
-                continue
+            # if self.netCode != netCode:
+            #     continue
             logging.debug(netInfo)
             net = createInstance(self.main.appNameBody, netClassName, netInfo)
             net.aCmdTemplates = self.aCmdTemplates
-            if not net.prepareTmpl():
-                return False
+            # if not net.prepareTmpl():
+            #     return False
             # net.tmplReplaceNetInfo()
             # net.makeHttpHead()
 
@@ -704,7 +714,10 @@ class FileFac(object):
             order.setPara(aParams)
             logging.debug('order param: %s', order.dParam)
             # netCode = self.aNetInfo[0]['NetCode']
-            order.net = self.dNetClient[self.netCode]
+            orderNet = self.netCode
+            if 'NETCODE' in order.dParam:
+                orderNet = order.dParam['NETCODE']
+            order.net = self.dNetClient[orderNet]
             return order
         return None
 
